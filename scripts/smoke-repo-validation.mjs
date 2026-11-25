@@ -17,7 +17,7 @@ try{
   await writeFile('.work/fix-bundle.json',JSON.stringify({repo:'fixture/repo',branch:'main',cfg,targets:[{kind:'issue',number:2,sha}],context:{files:[{path:file,content:original}]}}));
   await writeFile('.work/fix-plan.json',JSON.stringify({ok:true,plan:{confidence:'high',summary:'SQL fixture',changes:[{path:file,content}]}}));
   const env={GITHUB_REPOSITORY:'fixture/repo'};
-  await validateFix(env,{run:(args,options)=>command(args.map(arg=>arg.startsWith('/tmp:')?arg.replace('/tmp:rw,','/tmp:rw,noexec,'):arg),options)});
+  await validateFix(env,{run:(args,options)=>command(args.map(arg=>arg.startsWith('/tmp:')?arg.replace('/tmp:rw,exec,','/tmp:rw,noexec,'):arg),options)});
   const old=JSON.parse(await readFile('.work/fix-verdict.json','utf8'));
   assert.equal(old.ok,false,'Old noexec scratch must reproduce the actual project test failure');
   assert.ok(old.checks?.some(check=>JSON.stringify(check.argv)==='["npm","test"]'&&check.exitCode!==0),'Failure must be identified as npm test');
