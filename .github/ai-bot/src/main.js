@@ -4,6 +4,7 @@ import { config, number, allowedPath, scrub, fingerprint, prompt, cleanOutput, c
 import { GitHub, comments, reportIssue, completed, botOwned, REPORT_MARKER } from './github.js';
 import { tokyo, agent } from './providers.js';
 import { isCommand, requireCommand } from './commands.js';
+import { openReport, publishReport } from './report-pr.js';
 
 async function json(path, max = 1000000) {
   if ((await stat(path)).size > max) throw new SafeError('CONFIG');
@@ -47,7 +48,8 @@ export async function prepare(env = process.env, ghArg) {
   const gh = ghArg || new GitHub(env.GITHUB_REPOSITORY, env.GH_TOKEN);
   const cfg = config(await json('.github/ai-bot/config.json'));
   const event = await json(env.GITHUB_EVENT_PATH,2000000);
-  if (env.GITHUB_EVENT_NAME === 'issue_comment' && !isCommand(event,env,'/ai-investigate')) return;
+  const reportPR = isCommand(event,env,'/ai-report-pr') || (env.GITHUB_EVENT_NAME === 'workflow_dispatch' && event.inputs?.result === 'report-pr');
+  if (env.GITHUB_EVENT_NAME === 'issue_comment' && !isCommand(event,env,'/ai-investigate') && !reportPR) return;
   const repo = await gh.request(gh.path());
   if (repo.private && env.ALLOW_PRIVATE_REPOSITORY !== 'true') throw new SafeError('PRIVATE');
   if (env.GITHUB_EVENT_NAME === 'schedule' && cfg.mode !== 'automatic') return;
@@ -67,10 +69,10 @@ export async function prepare(env = process.env, ghArg) {
   }
   if (trigger === 'workflow_dispatch') {
     const kind = event.inputs?.target, n = number(event.inputs?.number);
-    if (!['issue','dependabot'].includes(kind)) throw new SafeError('CONFIG');
+    if (!['issue','dependabot'].includes(kind) || (reportPR && kind !== 'issue')) throw new SafeError('CONFIG');
     targets = [kind === 'issue' ? issueTarget(await gh.request(gh.path(`/issues/${n}`))) : alertTarget(await gh.request(gh.path(`/dependabot/alerts/${n}`)))];
   } else if (trigger === 'issue_comment') {
-    const n = await requireCommand(gh,event,env,'/ai-investigate');
+    const n = await requireCommand(gh,event,env,reportPR?'/ai-report-pr':'/ai-investigate');
     targets = [issueTarget(await gh.request(gh.path(`/issues/${n}`)))];
   } else if (trigger === 'issues') {
     if (cfg.mode !== 'automatic' || event.action !== 'labeled' || event.label?.name !== cfg.issueLabel) return;
@@ -87,13 +89,14 @@ export async function prepare(env = process.env, ghArg) {
   for (const target of targets) {
     const fp = fingerprint(target,sha,cfg);
     const rows = target.kind === 'issue' ? await comments(gh,target.number) : reportComments;
-    if (!completed(rows,fp)) pending.push({ ...target, sha, fingerprint: fp });
+    if (reportPR || !completed(rows,fp)) pending.push({ ...target, sha, fingerprint: fp });
     if (pending.length >= cfg.maxTargetsPerRun) break;
   }
   if (!pending.length) return;
-  const context = await collectFiles(gh,sha,cfg,pending);
-  await save('.work/bundle.json',{ version: 1, repo: gh.repo, cfg, targets: pending, context });
-  if (env.GITHUB_OUTPUT) await appendFile(env.GITHUB_OUTPUT,`ready=true\nprovider=${cfg.provider}\n`);
+  const existingReportPR = reportPR ? (await openReport(gh,pending[0].number))?.number : undefined;
+  const context = existingReportPR ? {files:[],omittedFiles:0} : await collectFiles(gh,sha,cfg,pending);
+  await save('.work/bundle.json',{ version: 1, repo: gh.repo, cfg, targets: pending, context, reportPR, existingReportPR });
+  if (env.GITHUB_OUTPUT) await appendFile(env.GITHUB_OUTPUT,`ready=true\nprovider=${cfg.provider}\nreport-pr=${reportPR?'true':'false'}\nreuse-report=${existingReportPR?'true':'false'}\n`);
 }
 export async function analyze(env = process.env) {
   const bundle = await json('.work/bundle.json');
@@ -103,6 +106,7 @@ export async function analyze(env = process.env) {
   let stopError;
   for (const target of bundle.targets) {
     try {
+      if(bundle.reportPR && bundle.existingReportPR){results.push({ok:true,provider:cfg.provider,text:'既存の調査PRを参照します。'});continue;}
       if (stopError) throw stopError;
       const input = prompt({ repository: bundle.repo, target, context: bundle.context });
       if (Buffer.byteLength(input) > 190000) throw new SafeError('CONFIG');
@@ -123,6 +127,7 @@ export async function publish(env = process.env, ghArg) {
   const event = await json(env.GITHUB_EVENT_PATH,2000000);
   if (bundle.repo !== gh.repo || result.results?.length !== bundle.targets?.length || bundle.targets.length > 3) throw new SafeError('OUTPUT');
   const cfg = config(bundle.cfg);
+  if(bundle.reportPR)return publishReport({env,gh,bundle,result,event,issueTarget});
   let report;
   for (const [i,target] of bundle.targets.entries()) {
     if (!['issue','dependabot'].includes(target.kind)) throw new SafeError('OUTPUT');

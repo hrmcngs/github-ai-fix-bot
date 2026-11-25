@@ -8,6 +8,6 @@
   },
   "scripts": {
     "test": "node --test",
-    "check": "bash -n install.sh && node --check .github/ai-bot/src/main.js && node --check .github/ai-bot/src/providers.js && node --check .github/ai-bot/src/broker.js && node --check .github/ai-bot/src/core.js && node --check .github/ai-bot/src/github.js && node --check .github/ai-bot/src/cli.js && node --check .github/ai-bot/src/fix-core.js && node --check .github/ai-bot/src/fix.js && node --check .github/ai-bot/src/verify-container.js && node --check .github/ai-bot/src/commands.js && node --check .github/ai-bot/src/markdown.js && node --check .github/ai-bot/src/auto-merge.js"
+    "check": "bash -n install.sh && node --check .github/ai-bot/src/main.js && node --check .github/ai-bot/src/providers.js && node --check .github/ai-bot/src/broker.js && node --check .github/ai-bot/src/core.js && node --check .github/ai-bot/src/github.js && node --check .github/ai-bot/src/cli.js && node --check .github/ai-bot/src/fix-core.js && node --check .github/ai-bot/src/fix.js && node --check .github/ai-bot/src/verify-container.js && node --check .github/ai-bot/src/commands.js && node --check .github/ai-bot/src/markdown.js && node --check .github/ai-bot/src/proposals.js && node --check .github/ai-bot/src/report-pr.js && node --check .github/ai-bot/src/auto-merge.js"
   }
 }

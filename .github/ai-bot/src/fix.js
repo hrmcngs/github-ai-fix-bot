@@ -10,6 +10,7 @@ import { collectFiles, issueTarget } from './main.js';
 import { tokyo, agent, command } from './providers.js';
 import { isCommand, requireCommand } from './commands.js';
 import { markdown } from './markdown.js';
+import { proposalLink, createLinkedProposal } from './proposals.js';
 import { editable, fixConfig, fixPrompt, parsePlan, planHash, fixId, literal } from './fix-core.js';
 const exec = promisify(execFile);
 const marker = n => `<!-- ai-fix:issue:${number(n)} -->`;
@@ -18,6 +19,7 @@ const reasons = {
   STALE: '調査中にデフォルトブランチまたはIssueが更新されました。新しい実行で再調査してください。',
   VALIDATION: 'オフライン環境での構文チェックまたは指定した検証が失敗しました。PRは作成していません。',
   DEPENDENCIES: '検証に必要な依存パッケージをオフライン環境に用意できません。検証を省略せず、PR作成を停止しました。',
+  NOTIFY: 'PRは作成しましたがIssueへの返信に失敗しました。同じコマンドで再実行すると既存PRのリンクを返信します。',
   PR: '修正PRを作成できませんでした。ActionsによるPR作成の許可とリポジトリ権限を確認してください。'
 };
 async function json(file, limit=1000000) {
@@ -65,7 +67,11 @@ export async function prepareFix(env=process.env,ghArg) {
   const target=issueTarget(issue);
   if(env.GITHUB_EVENT_NAME==='issues' && !issue.labels.some(l=>l.name===settings.label))return;
   const existing=await openProposal(gh,n);
-  if(existing){await summary(`Issue #${n}には修正PR #${number(existing.number)}があります。追加のAI呼び出しは行いません。`,env);return;}
+  if(existing){
+    const body=`${proposalLink(gh,existing.number)} が既にあります。追加のAI呼び出しやPR作成は行いません。`;
+    await post(gh,n,body,env.GITHUB_EVENT_NAME==='issue_comment'?event.comment.id:undefined);
+    await summary(body,env);return;
+  }
   const ref=await gh.request(gh.path(`/git/ref/heads/${encodeURIComponent(repo.default_branch)}`));
   const sha=ref.object?.sha;
   if(!/^[a-f0-9]{40}$/.test(sha))throw new SafeError('ACCESS');
@@ -166,7 +172,7 @@ export async function publishFix(env=process.env,ghArg) {
     await failure(reasons.STALE);throw new SafeError('STALE');
   }
   const existing=await openProposal(gh,n);
-  if(existing){await post(gh,n,`修正PR #${number(existing.number)} が既にあります。${footer}`,commandId);return;}
+  if(existing){await post(gh,n,`${proposalLink(gh,existing.number)} が既にあります。${footer}`,commandId);return;}
   // Re-read original blobs before any writes. Every proposed path must remain a regular tracked file.
   const tree=await gh.request(gh.path(`/git/trees/${target.sha}?recursive=1`));
   if(tree.truncated)throw new SafeError('ACCESS');
@@ -176,21 +182,16 @@ export async function publishFix(env=process.env,ghArg) {
     const blob=await gh.request(gh.path(`/git/blobs/${entry.sha}`));
     if(blob.encoding!=='base64' || Buffer.from(blob.content,'base64').toString('utf8')!==bundle.context.files.find(f=>f.path===change.path)?.content)throw new SafeError('OUTPUT');
   }
-  const base=await gh.request(gh.path(`/git/commits/${target.sha}`));
-  const newTree=await gh.request(gh.path('/git/trees'),'POST',{base_tree:base.tree.sha,tree:plan.changes.map(change=>({path:change.path,mode:'100644',type:'blob',content:change.content}))});
-  const commit=await gh.request(gh.path('/git/commits'),'POST',{message:`fix: propose changes for issue #${n}`,tree:newTree.sha,parents:[target.sha]});
-  const branch=`ai-fix/issue-${n}-${fixId(bundle).slice(0,12)}-${number(env.GITHUB_RUN_ID)}`;
-  let branchCreated=false,pr;
+  const prBody=`${marker(n)}\nCloses #${n}\n\nAI (${bundle.cfg.provider}) による修正提案です。人間のレビューが必要です。\n\n${markdown(plan.summary)}\n\n検証対象SHA: \`${target.sha}\`\n変更したJavaScriptの構文チェック: 成功\nオフライン・Secretなし環境での検証: 成功\n\n${literal(settings.commands.map(args=>args.join(' ')).join('\n'))}\n\nネットワークを必要とする検証は行っていません。検証成功は修正の正しさを保証しません。${footer}`;
   try{
-    await gh.request(gh.path('/git/refs'),'POST',{ref:`refs/heads/${branch}`,sha:commit.sha});branchCreated=true;
-    const body=`${marker(n)}\nCloses #${n}\n\nAI (${bundle.cfg.provider}) による修正提案です。人間のレビューが必要です。\n\n${markdown(plan.summary)}\n\n検証対象SHA: \`${target.sha}\`\n変更したJavaScriptの構文チェック: 成功\nオフライン・Secretなし環境での検証: 成功\n\n${literal(settings.commands.map(args=>args.join(' ')).join('\n'))}\n\nネットワークを必要とする検証は行っていません。検証成功は修正の正しさを保証しません。${footer}`;
-    pr=await gh.request(gh.path('/pulls'),'POST',{title:`fix: address issue #${n}`,head:branch,base:bundle.branch,body});
-  }catch{
-    if(branchCreated)await gh.request(gh.path(`/git/refs/heads/${branch}`),'DELETE').catch(()=>{});
+    await createLinkedProposal(gh,{kind:'fix',issue:n,runId:env.GITHUB_RUN_ID,sha:target.sha,id:fixId(bundle),base:bundle.branch,title:`fix: address issue #${n}`,body:prBody,files:plan.changes,notify:async(pr)=>{
+      const body=`修正案を ${proposalLink(gh,pr.number)} に作成しました。\n\n${markdown(plan.summary)}\n\n構文チェックと設定された検証は成功しました。変更内容とテストの妥当性をレビューしてください。${footer}`;
+      await post(gh,n,body,commandId);await summary(body,env);
+    }});
+  }catch(error){
+    if(error.code==='NOTIFY'){await summary(`${proposalLink(gh,error.proposalNumber)} は作成済みです。${reasons.NOTIFY}`,env);throw error;}
     await failure(reasons.PR);throw new SafeError('PR');
   }
-  const body=`修正案をPR #${number(pr.number)} に作成しました。\n\n${markdown(plan.summary)}\n\n構文チェックと設定された検証は成功しました。変更内容とテストの妥当性をレビューしてください。${footer}`;
-  await post(gh,n,body,commandId);await summary(body,env);
 }
 if(process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href){
   try{

@@ -27,6 +27,8 @@ main() {
     .github/ai-bot/src/commands.js
     .github/ai-bot/src/auto-merge.js
     .github/ai-bot/src/markdown.js
+    .github/ai-bot/src/proposals.js
+    .github/ai-bot/src/report-pr.js
     .github/ai-bot/src/github.js
     .github/ai-bot/src/main.js
     .github/ai-bot/src/providers.js
