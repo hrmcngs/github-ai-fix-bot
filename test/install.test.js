@@ -12,7 +12,14 @@ async function fixture(fn) {
   const dir=await mkdtemp(join(tmpdir(),'ai-bot-installer-'));
   const root=join(dir,'target with spaces'),bin=join(dir,'bin');
   await mkdir(root);await mkdir(bin);await mkdir(join(dir,'home'));
-  await writeFile(join(bin,'git'),'#!/bin/sh\nif [ "$1" = "-C" ]; then printf "%s\\n" "$FIXTURE_ROOT"; else printf "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\trefs/heads/main\\n"; fi\n',{mode:0o755});
+  await writeFile(join(bin,'git'),`#!${process.execPath}
+const fs=require('node:fs'),crypto=require('node:crypto'),args=process.argv.slice(2);
+if(args[0]==='hash-object'){
+  const bytes=fs.readFileSync(args.at(-1));
+  process.stdout.write(crypto.createHash('sha1').update('blob '+bytes.length+'\\0').update(bytes).digest('hex')+'\\n');
+}else if(args[0]==='-C')process.stdout.write(process.env.FIXTURE_ROOT+'\\n');
+else process.stdout.write('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\trefs/heads/main\\n');
+`,{mode:0o755});
   await writeFile(join(bin,'curl'),`#!${process.execPath}
 const fs=require('node:fs'),path=require('node:path');
 const args=process.argv.slice(2),url=args.find(x=>x.startsWith('https://'));
@@ -32,6 +39,9 @@ test('piped installer installs pinned files, preserves config and supports repea
   assert.equal(await readFile(join(root,'.github/ai-bot/config.json'),'utf8'),'custom settings');
   assert.equal(await readFile(join(root,'package.json'),'utf8'),'original project');
   assert.equal(await readFile(join(root,'.github/workflows/investigate.yml'),'utf8'),await readFile(join(source,'.github/workflows/investigate.yml'),'utf8'));
+  const state=JSON.parse(await readFile(join(root,'.github/ai-bot/installation.json'),'utf8'));
+  assert.equal(state.commit,'a'.repeat(40));assert.equal(state.source,'hrmcngs/github-ai-fix-bot');
+  assert.ok(state.files['.github/ai-bot/src/updates.js']);assert.equal(state.files['.github/ai-bot/config.json'],undefined);
   assert.equal(run().status,0);
   assert.ok(!result.stderr.includes('unbound variable'));
 }));

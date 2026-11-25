@@ -1,0 +1,173 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
+import {readFile,mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {SOURCE,STATE,MANIFEST,UPDATE_MARKER,manifest,installation,Upstream,release,checkUpdate,authorizeUpdate,updateFiles,applyUpdate,loadInstallation,authorizeAutomaticUpdate,updateStatus} from '../.github/ai-bot/src/updates.js';
+const old='a'.repeat(40),latest='b'.repeat(40),base='c'.repeat(40);
+const file='.github/ai-bot/src/main.js';
+const gitHash=content=>createHash('sha1').update(`blob ${Buffer.byteLength(content)}\0`).update(content).digest('hex');
+function sourceFixture(){
+  const contents={[MANIFEST]:JSON.stringify({version:1,files:[MANIFEST,file,'.github/workflows/fix.yml','.github/ai-bot/config.json']}),[file]:'export const version=2;\n','.github/workflows/fix.yml':'name: Updated\n','.github/ai-bot/config.json':'{"keep":"settings"}'};
+  const blobs=new Map(),tree=[];
+  for(const [path,content]of Object.entries(contents)){const hash=gitHash(content);tree.push({path,type:'blob',mode:'100644',sha:hash,size:Buffer.byteLength(content)});blobs.set(hash,content);}
+  const calls=[];return{calls,tree,contents,request:async p=>{calls.push(p);if(p==='/commits/main')return{sha:latest};if(p.startsWith('/git/trees/'))return{tree};if(p.startsWith('/git/blobs/'))return{encoding:'base64',content:Buffer.from(blobs.get(p.split('/').at(-1))).toString('base64')};throw new Error('Unexpected source route');}};
+}
+function fixture({issues=[],role='write',closed=false,changedNotice=false,modified=false}={}){
+  const source=sourceFixture();
+  const state={version:1,source:SOURCE,commit:old,files:{[MANIFEST]:gitHash(source.contents[MANIFEST]),[file]:gitHash('export const version=1;\n'),'.github/workflows/fix.yml':gitHash('name: Old\n')}};
+  const notice={number:9,state:'open',user:{type:'Bot',login:'github-actions[bot]'},body:`${UPDATE_MARKER}\n<!-- ai-bot-update-target:${latest} -->\nUpdate?`};
+  const event={repository:{full_name:'a/b'},action:'created',issue:notice,comment:{id:123,body:'/ai-update',user:{type:'User',login:'owner'}}};
+  const env={GITHUB_REPOSITORY:'a/b',GITHUB_EVENT_NAME:'issue_comment',GITHUB_REF:'refs/heads/main',GITHUB_ACTOR:'owner',GITHUB_RUN_ID:'123'};
+  const tree=Object.entries(state.files).map(([path,hash])=>({path,type:'blob',mode:'100644',sha:modified&&path===file?base:hash}));
+  tree.push({path:STATE,type:'blob',mode:'100644',sha:gitHash(JSON.stringify(state))});
+  const calls=[];const gh={repo:'a/b',calls,path:(p='')=>`/repos/a/b${p}`,list:async p=>p.includes('/pulls?')?[]:issues,request:async(p,method='GET',body)=>{
+    calls.push({p,method,body});
+    if(method!=='GET'){if(p.endsWith('/pulls'))return{number:15};if(p.endsWith('/issues'))return{number:9};return{sha:base};}
+    if(p==='/repos/a/b')return{default_branch:'main'};
+    if(p.includes('/permission'))return{permission:role};
+    if(p.endsWith('/issues/comments/123'))return{body:'/ai-update',user:event.comment.user,issue_url:'https://api.github.com/repos/a/b/issues/9'};
+    if(p.endsWith('/issues/9'))return{...notice,state:closed?'closed':'open',body:changedNotice?notice.body.replace(latest,old):notice.body};
+    if(p.includes('/git/ref/heads/'))return{object:{sha:base}};
+    if(p.includes('/git/trees/'))return{tree};
+    if(p.includes('/git/commits/'))return{tree:{sha:base}};
+    throw new Error('Unexpected destination route');
+  }};
+  return{gh,source,state,notice,event,env,tree};
+}
+test('distribution manifest agrees with installer and rejects arbitrary paths',async()=>{
+  const data=JSON.parse(await readFile(new URL('../.github/ai-bot/distribution.json',import.meta.url)));
+  const installer=await readFile(new URL('../install.sh',import.meta.url),'utf8');
+  for(const path of manifest(data))assert.ok(installer.includes('    '+path+'\n'));
+  for(const bad of ['src/app.js','.github/ai-bot/../config.json','.github/workflows/../../app.js',STATE])assert.throws(()=>manifest({version:1,files:[MANIFEST,bad]}));
+  assert.throws(()=>installation({version:1,source:'evil/repo',commit:old,files:{}}));
+});
+test('update checks ask in an Issue once per version and respect dismissal',async()=>{
+  let f=fixture();await checkUpdate(f.gh,f.state,f.source);
+  const create=f.gh.calls.find(c=>c.method==='POST');assert.equal(create.p,'/repos/a/b/issues');assert.ok(create.body.body.includes('/ai-update'));assert.ok(create.body.title.includes('更新'));
+  f=fixture({issues:[{...f.notice,state:'closed'}]});await checkUpdate(f.gh,f.state,f.source);assert.equal(f.gh.calls.length,0);
+  f=fixture();const same=await release(f.source);await checkUpdate(f.gh,{...f.state,files:same.files},f.source);assert.equal(f.gh.calls.length,0);
+});
+test('a newer version updates an existing open notification instead of creating duplicate Issues',async()=>{
+  const f=fixture();f.gh.list=async()=>[{...f.notice,body:f.notice.body.replace(latest,old)}];
+  await checkUpdate(f.gh,f.state,f.source);
+  assert.equal(f.gh.calls[0].method,'PATCH');assert.equal(f.gh.calls[0].p,'/repos/a/b/issues/9');
+});
+test('only authorized exact commands on the unchanged bot notice can create updates',async()=>{
+  const f=fixture();assert.equal((await authorizeUpdate(f.gh,f.event,f.env)).commit,latest);
+  for(const options of [{role:'read'},{closed:true},{changedNotice:true}]){
+    const bad=fixture(options);await assert.rejects(authorizeUpdate(bad.gh,bad.event,bad.env));assert.ok(!bad.gh.calls.some(c=>c.method!=='GET'));
+  }
+  await assert.rejects(authorizeUpdate(f.gh,{...f.event,issue:{...f.notice,user:{type:'User',login:'owner'}}},f.env));
+});
+test('update files preserve config and reject locally changed files and symlink ancestors',async()=>{
+  let f=fixture();const releaseData=await release(f.source);
+  const files=await updateFiles(f.gh,f.state,releaseData,f.source,base);
+  assert.ok(files.some(c=>c.path===file));assert.ok(files.some(c=>c.path===STATE));assert.ok(!files.some(c=>c.path.endsWith('/config.json')));
+  f=fixture({modified:true});await assert.rejects(updateFiles(f.gh,f.state,releaseData,f.source,base),e=>e.code==='UPDATE_CONFLICT');
+  f=fixture();f.tree.push({path:'.github/ai-bot',type:'blob',mode:'120000',sha:old});await assert.rejects(updateFiles(f.gh,f.state,releaseData,f.source,base));
+});
+test('approved update creates a dedicated PR and replies without changing main or executing upstream',async()=>{
+  const f=fixture();await applyUpdate(f.gh,f.gh,f.event,f.env,f.state,f.source);
+  const writes=f.gh.calls.filter(c=>c.method!=='GET');
+  const pr=writes.find(c=>c.p.endsWith('/pulls'));assert.match(pr.body.head,/^ai-update\/issue-9-/);assert.equal(pr.body.base,'main');
+  assert.ok(writes.some(c=>c.p.endsWith('/issues/9/comments')&&c.body.body.includes('/pull/15')));
+  assert.ok(!writes.some(c=>c.p.endsWith('/merge')||c.p.includes('/dispatches')||c.method==='PATCH'));
+  assert.ok(f.source.calls.every(p=>!p.includes('contents')));
+});
+test('missing update token reports safely and performs no branch or PR writes',async()=>{
+  const f=fixture();await assert.rejects(applyUpdate(f.gh,null,f.event,f.env,f.state,f.source),e=>e.code==='UPDATE_TOKEN');
+  assert.ok(f.gh.calls.some(c=>c.body?.body?.includes('AI_BOT_UPDATE_TOKEN')));assert.ok(!f.gh.calls.some(c=>c.p.includes('/git/')));
+});
+test('upstream downloads use a fixed host with no destination credentials and validate blob hashes',async()=>{
+  const requests=[];const upstream=new Upstream(async(url,options)=>{requests.push({url,options});return new Response(JSON.stringify({sha:latest}));});
+  await upstream.request('/commits/main');assert.ok(requests[0].url.startsWith(`https://api.github.com/repos/${SOURCE}/`));assert.equal(requests[0].options.headers.Authorization,undefined);
+  await assert.rejects(upstream.request('/../../evil'));
+  const f=fixture(),original=f.source.request;
+  f.source.request=async path=>path.startsWith('/git/blobs/')?{encoding:'base64',content:Buffer.from('tampered').toString('base64')}:original(path);
+  await assert.rejects(release(f.source),e=>e.code==='UPDATE_SOURCE');
+});
+test('removed upstream files produce deletions only on the dedicated update branch',async()=>{
+  const f=fixture(),obsolete='.github/ai-bot/src/obsolete.js';
+  f.state.files[obsolete]=old;f.tree.push({path:obsolete,type:'blob',mode:'100644',sha:old});
+  await applyUpdate(f.gh,f.gh,f.event,f.env,f.state,f.source);
+  const tree=f.gh.calls.find(c=>c.method==='POST'&&c.p.endsWith('/git/trees'));
+  assert.equal(tree.body.tree.find(entry=>entry.path===obsolete).sha,null);
+  assert.ok(!f.gh.calls.some(c=>c.method==='PATCH'&&c.p.includes('/git/refs')));
+});
+test('identical unowned workflows are not silently adopted into the update baseline',async()=>{
+  const f=fixture(),releaseData=await release(f.source),path='.github/workflows/fix.yml';
+  delete f.state.files[path];f.tree.find(entry=>entry.path===path).sha=releaseData.files[path];
+  await assert.rejects(updateFiles(f.gh,f.state,releaseData,f.source,base),e=>e.code==='UPDATE_CONFLICT');
+});
+test('an already-managed file manually brought to the approved version remains acceptable',async()=>{
+  const f=fixture(),releaseData=await release(f.source);
+  f.tree.find(entry=>entry.path===file).sha=releaseData.files[file];
+  const changes=await updateFiles(f.gh,f.state,releaseData,f.source,base);
+  assert.ok(!changes.some(entry=>entry.path===file));assert.ok(changes.some(entry=>entry.path===STATE));
+});
+
+test('missing or malformed installation records reply safely to an authorized update request',async()=>{
+  const dir=await mkdtemp(join(tmpdir(),'ai-update-state-')),original=process.cwd();
+  await mkdir(join(dir,'.github/ai-bot'),{recursive:true});process.chdir(dir);
+  try{
+    for(const content of [null,'not json','{}']){
+      if(content!==null)await writeFile(STATE,content);
+      const f=fixture();await assert.rejects(loadInstallation(f.gh,f.event,f.env,'apply'),e=>e.code==='UPDATE_STATE');
+      const writes=f.gh.calls.filter(call=>call.method!=='GET');
+      assert.equal(writes.length,1);assert.ok(writes[0].p.endsWith('/issues/9/comments'));
+      assert.ok(writes[0].body.body.includes('導入記録'));assert.ok(!writes[0].body.body.includes('not json'));
+    }
+    const denied=fixture({role:'read'});await assert.rejects(loadInstallation(denied.gh,denied.event,denied.env,'apply'),e=>e.code==='ACCESS');
+    assert.ok(!denied.gh.calls.some(call=>call.method!=='GET'));
+    const f=fixture();await writeFile(STATE,JSON.stringify(f.state));
+    assert.deepEqual(await loadInstallation(f.gh,f.event,f.env,'apply'),f.state);
+  }finally{process.chdir(original);await rm(dir,{recursive:true,force:true});}
+});
+
+function automatic(f,trigger='schedule'){
+  return{...f.env,GITHUB_EVENT_NAME:trigger,AI_BOT_UPDATE_AUTOMATIC:'true',AI_BOT_UPDATE_ISSUE:'9',AI_BOT_UPDATE_COMMIT:latest};
+}
+test('scheduled detection returns a pinned target for new and existing open notices, never dismissed notices',async()=>{
+  let f=fixture();assert.deepEqual(await checkUpdate(f.gh,f.state,f.source),{number:9,commit:latest});
+  f=fixture({issues:[f.notice]});assert.deepEqual(await checkUpdate(f.gh,f.state,f.source),{number:9,commit:latest});
+  assert.equal(f.gh.calls.length,0);
+  f=fixture({issues:[{...f.notice,state:'closed'}]});assert.equal(await checkUpdate(f.gh,f.state,f.source),undefined);
+});
+test('automatic update authorization binds trusted triggers, repository, branch and checked notice SHA',async()=>{
+  let f=fixture();const event={repository:{full_name:'a/b'}};
+  assert.equal((await authorizeAutomaticUpdate(f.gh,event,automatic(f))).commit,latest);
+  for(const overrides of [{GITHUB_EVENT_NAME:'issue_comment'},{GITHUB_REF:'refs/heads/feature'},{AI_BOT_UPDATE_AUTOMATIC:'false'},{AI_BOT_UPDATE_COMMIT:old}]){
+    f=fixture();await assert.rejects(authorizeAutomaticUpdate(f.gh,event,{...automatic(f),...overrides}));
+    assert.ok(!f.gh.calls.some(c=>c.method!=='GET'));
+  }
+  f=fixture({closed:true});await assert.rejects(authorizeAutomaticUpdate(f.gh,event,automatic(f)));
+  f=fixture({role:'read'});await assert.rejects(authorizeAutomaticUpdate(f.gh,event,automatic(f,'workflow_dispatch')));
+});
+test('a scheduled update creates the PR and Issue link without any user comment',async()=>{
+  const f=fixture();await applyUpdate(f.gh,f.gh,{repository:{full_name:'a/b'}},automatic(f),f.state,f.source);
+  assert.ok(f.gh.calls.some(c=>c.method==='POST'&&c.p.endsWith('/pulls')));
+  assert.ok(f.gh.calls.some(c=>c.p.endsWith('/issues/9/comments')&&c.body?.body.includes('/pull/15')));
+  assert.ok(!f.gh.calls.some(c=>c.p.endsWith('/issues/comments/123')));
+  assert.ok(!f.gh.calls.some(c=>c.p.endsWith('/merge')));
+});
+test('automatic retries reuse open PRs and respect closed PRs without needing writer credentials',async()=>{
+  for(const state of ['open','closed']){
+    const f=fixture(),list=f.gh.list;
+    f.gh.list=async path=>path.includes('/pulls?')?[{number:15,state,body:`<!-- ai-bot-update-pr:${latest} -->\nRefs #9`,head:{ref:'ai-update/issue-9-0123456789ab-123',repo:{full_name:'a/b'}},base:{ref:'main',repo:{full_name:'a/b'}}}]:list(path);
+    await applyUpdate(f.gh,null,{repository:{full_name:'a/b'}},automatic(f),f.state,f.source);
+    assert.ok(!f.gh.calls.some(c=>c.p.includes('/git/')));
+    assert.ok(!f.gh.calls.some(c=>c.method==='POST'&&c.p.endsWith('/pulls')));
+    assert.ok(f.gh.calls.some(c=>c.body?.body?.includes(state==='open'?'/pull/15':'閉じられています')));
+  }
+});
+test('repeated automatic status reports do not post duplicate comments',async()=>{
+  const f=fixture();await updateStatus(f.gh,9,latest,'setup needed');
+  const first=f.gh.calls.find(c=>c.method==='POST').body.body;
+  f.gh.calls.length=0;
+  f.gh.list=async()=>[{id:42,user:{type:'Bot',login:'github-actions[bot]'},body:first}];
+  await updateStatus(f.gh,9,latest,'setup needed');assert.equal(f.gh.calls.length,0);
+  await updateStatus(f.gh,9,latest,'PR created');assert.equal(f.gh.calls.length,1);
+  assert.equal(f.gh.calls[0].method,'PATCH');assert.equal(f.gh.calls[0].p,'/repos/a/b/issues/comments/42');
+});

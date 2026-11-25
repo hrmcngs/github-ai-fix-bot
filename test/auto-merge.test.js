@@ -94,3 +94,12 @@ test('Issue changes while checking CI block auto-merge',async()=>{
   gh.request=async path=>path.endsWith('/issues/1')&&++reads>1?{...issue,body:'new request'}:request(path);
   assert.equal((await considerMerge(gh,2,cfg,deps)).merged,false);assert.equal(enabled.length,0);
 });
+test('retargeting the base ref with an unchanged SHA blocks native merge',async()=>{
+  const {gh,enabled,deps}=fixture({fresh:{...pr(),base:{...pr().base,ref:'release'}}});
+  assert.equal((await considerMerge(gh,2,cfg,deps)).merged,false);assert.equal(enabled.length,0);
+});
+test('closing an unchanged Issue while checking CI blocks native merge',async()=>{
+  const {gh,enabled,deps}=fixture(),request=gh.request;let reads=0;
+  gh.request=async path=>path.endsWith('/issues/1')&&++reads>1?{...issue,state:'closed'}:request(path);
+  assert.equal((await considerMerge(gh,2,cfg,deps)).merged,false);assert.equal(enabled.length,0);
+});

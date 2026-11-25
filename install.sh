@@ -23,6 +23,9 @@ main() {
     .github/ai-bot/Dockerfile.verify
     .github/ai-bot/package.json
     .github/ai-bot/config.json
+    .github/ai-bot/distribution.json
+    .github/ai-bot/src/bulk.js
+    .github/ai-bot/src/updates.js
     .github/ai-bot/src/core.js
     .github/ai-bot/src/commands.js
     .github/ai-bot/src/auto-merge.js
@@ -40,6 +43,9 @@ main() {
     .github/ai-bot/src/verify-container.js
     .github/workflows/investigate.yml
     .github/workflows/fix.yml
+    .github/workflows/fix-one.yml
+    .github/workflows/investigate-one.yml
+    .github/workflows/bot-updates.yml
     .github/workflows/proposal-updates.yml
     .github/workflows/auto-merge.yml
   )
@@ -80,6 +86,20 @@ main() {
       --output "$staging/$relative" || fail "Download failed: $relative (source files must be pushed first)"
     [[ -s "$staging/$relative" ]] || fail "Empty download: $relative"
   done
+  [[ ! -L "$root/.github/ai-bot/installation.json" ]] || fail 'Symlinked installation record'
+  if [[ -e "$root/.github/ai-bot/installation.json" && ! -f "$root/.github/ai-bot/installation.json" ]]; then fail 'Invalid installation record'; fi
+  {
+    printf '{"version":1,"source":"hrmcngs/github-ai-fix-bot","commit":"%s","files":{' "$commit"
+    local separator='' hash=''
+    for relative in "${files[@]}"; do
+      [[ "$relative" == '.github/ai-bot/config.json' ]] && continue
+      hash=$(git hash-object --no-filters "$staging/$relative") || fail 'Could not hash source file'
+      [[ "$hash" =~ ^[0-9a-f]{40}$ ]] || fail 'Installation requires Git SHA-1 object hashes'
+      printf '%s"%s":"%s"' "$separator" "$relative" "$hash"
+      separator=','
+    done
+    printf '}}\n'
+  } > "$staging/installation.json"
   # Check every destination before creating or copying any project files.
   for relative in "${files[@]}"; do
     [[ ! -L "$root/$relative" ]] || fail "Symlinked destination: $relative"
@@ -100,6 +120,9 @@ main() {
     cmp -s "$staging/$relative" "$root/$relative" || fail "Could not install: $relative"
     printf 'Installed: %s\n' "$relative"
   done
+  if [[ ! -e "$root/.github/ai-bot/installation.json" ]]; then
+    cp -n "$staging/installation.json" "$root/.github/ai-bot/installation.json"
+  fi
   printf '\nInstalled in: %s\nSource commit: %s\n' "$root" "$commit"
   cat <<'NEXT'
 
@@ -108,7 +131,9 @@ Next steps:
   2. Review the diff and merge the files into your default branch via a PR.
   3. Register TOKYO_AI_API_KEY, ANTHROPIC_API_KEY or OPENAI_API_KEY in Actions Secrets.
      Never paste API keys into Issues, comments or workflow inputs.
-  4. Actions > AI investigation > Run workflow.
+  4. Actions > AI investigation or AI fix > Run workflow (blank number processes all).
+  5. Bot update notices checks for updates daily and asks in an Issue.
+     Optional update PRs require AI_BOT_UPDATE_TOKEN with Contents, Pull requests and Workflows write.
 
 Docs: https://github.com/hrmcngs/github-ai-fix-bot#readme
 NEXT
