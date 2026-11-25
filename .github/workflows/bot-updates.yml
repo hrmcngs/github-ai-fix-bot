@@ -16,10 +16,8 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
-      issues: write
     outputs:
       ready: ${{ steps.check.outputs.ready }}
-      issue: ${{ steps.check.outputs.issue }}
       commit: ${{ steps.check.outputs.commit }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -84,5 +82,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           AI_BOT_UPDATE_TOKEN: ${{ secrets.AI_BOT_UPDATE_TOKEN }}
           AI_BOT_UPDATE_AUTOMATIC: ${{ github.event_name != 'issue_comment' && needs.check.outputs.ready == 'true' && 'true' || 'false' }}
-          AI_BOT_UPDATE_ISSUE: ${{ needs.check.outputs.issue }}
           AI_BOT_UPDATE_COMMIT: ${{ needs.check.outputs.commit }}
