@@ -1,6 +1,6 @@
 # github-ai-fix-bot
 
-GitHub上でIssueやDependabotアラートを調査し、日本語の修正方針をコメントするBotです。各利用者が自分のpublicリポジトリへ導入し、自分のAI認証情報を使用します。管理画面や外部のBotサーバーは不要です。AIへの送信とCLIの取得には外部サービスを利用します。
+GitHub上でIssueやDependabotアラートを調査し、日本語の修正方針をコメントするBotです。各利用者が自分のリポジトリへ導入し、自分のAI認証情報を使用します。管理画面や外部のBotサーバーは不要です。AIへの送信とCLIの取得には外部サービスを利用します。
 
 **調査モード**では修正方針をコメントし、**修正モード**では既存JavaScriptの限定的な変更を検証してPRで提案します。依存更新、アラートの却下、デフォルトブランチへの直接コミットは行いません。自動マージは、専用ラベルと保護ルールで明示的に許可した場合だけ実行します。AIの回答を根拠に変更を確定せず、人間が調査結果とPRをレビューしてください。
 
@@ -22,13 +22,13 @@ curl -fsSL https://raw.githubusercontent.com/hrmcngs/github-ai-fix-bot/main/inst
 
 APIキーの入力、依存パッケージのインストール、コミット・push・Actions起動は行いません。配置後に以下の設定を進めてください。公開URLは `install.sh` とBot本体をGitHubのmainへpushした後に利用できます。
 
-1. インストーラーで配置した次のファイルを確認し、レビューしたPRで対象publicリポジトリのデフォルトブランチに取り込みます。手動コピーでの導入も可能です。
+1. インストーラーで配置した次のファイルを確認し、レビューしたPRで導入先リポジトリのデフォルトブランチに取り込みます。手動コピーでの導入も可能です。
    - `.github/ai-bot/` ディレクトリ全体（隠しファイルの `.dockerignore` も含む）
-   - `.github/workflows/investigate.yml` と `.github/workflows/fix.yml`
+   - インストーラーが配置した `.github/workflows/` 内のBot用ワークフロー（`*-one.yml` も必要）
 2. GitHub Actionsを有効にします。Dependabotを調査する場合は、対象リポジトリのdependency graphとDependabot alertsも有効にしてください。
 3. `.github/ai-bot/config.json` の `provider`、モデル、調査対象パスを設定します。APIキーは設定ファイルへ書きません。
 4. **Settings → Secrets and variables → Actions → New repository secret** で、選択したAIのSecretを登録します。
-5. Actionsの **AI investigation → Run workflow** で、デフォルトブランチを選び、`target` と `number` を指定します。
+5. Actionsの **AI investigation → Run workflow** で、デフォルトブランチを選び、`target` を選びます。`number` は空欄で全件、番号を入力すれば1件です。
 
 既存プロジェクトの `package.json` や `src/` を置き換える必要はありません。Botのコードは `.github/ai-bot/` 内で完結し、外部のnpm依存はありません。Node.jsはワークフローが用意します。CLI実行にはGitHub-hosted Ubuntu runner上のDockerを使用します。self-hosted runner、Windowsは対象外です。privateリポジトリは初期状態では停止します。管理者がAIへの送信を許可する場合に限り、Settings → Secrets and variables → Actions → VariablesにRepository Variable `AI_BOT_ALLOW_PRIVATE` を値 `true` で登録してください。Issue本文と許可パス内のソースの一部が選択したAIへ送信されます。公開範囲は変更しません。
 
@@ -306,3 +306,31 @@ write以上の利用者がIssueのタイトル・本文を編集すると、`Ret
 `.github/ai-bot/config.json` の `"referencePreviousPRs": true` を `false` にすると、引数なし・ラベル起動の既定値を参照なしにできます。未設定の既定値は `true` です。Actionsの **Run workflow** では `reference_previous` を `on`（参照する）、`off`（参照しない）、`default`（設定に従う）から選びます。
 
 参照なしの場合は旧PRの差分を取得せず、AIにも渡さず、旧PRへの参考リンクを新PRに追加しません。現在のデフォルトブランチに既にマージされた変更は通常のソースとして読みます。参照の選択が異なる既存PRは再利用しません。古いPRを閉じる動作はどちらの選択でも有効です。
+
+
+## 番号なしでまとめて実行する
+
+- 調査: **Actions → AI investigation → Run workflow**。`target=all`、`number` は空欄のまま実行すると、未完了のIssueと未対応のDependabotアラートをまとめて調査します。`target=issue` / `dependabot` で種類を絞れます。
+- 修正PR: **Actions → AI fix → Run workflow**。`number` は空欄で未完了の全Issue、番号ありで1件です。各Issueを別々に調査・検証し、検証成功時だけ修正PRとIssueへの返信を作ります。Dependabotアラートは引き続き調査のみです。
+- 調査結果をPRにする場合は、`target=issue`、`result=report-pr` を選びます。番号なしならIssueごとにMarkdownのPRを作ります。
+
+対象はAPIのページをたどって取得します。PRとBot自身が作った通知・集約用Issueは一括処理から除外します。権限不足や一覧取得の失敗は明示的に停止します。`target=all` にはDependabot alertsの有効化と閲覧権限も必要です。利用できない場合は `target=issue` を選んでください。
+
+1件ずつ処理し、1件の失敗で他の対象をキャンセルしません。Actionsの対象別ジョブとSummaryに結果が表示されます。同じ内容の調査済み対象はスキップし、同じ版・同じ参照設定の修正PRがあれば再利用します。定期調査は従来どおり `mode=automatic` と `maxTargetsPerRun` の制限に従います。
+
+手動一括実行の上限は1回256件です。超えた場合は切り捨てず停止します。Issueとアラートを分けるか、対象を整理して実行してください。待機中に一時APIキーの有効期限・上限に達した場合は安全なエラーとなり、修正を確定しません。新しいキーをSecretに登録して再実行できます。実行時間とActions利用枠は対象数に応じて増えます。
+
+## Botの更新通知と更新PR
+
+新版のインストーラーは `.github/ai-bot/installation.json` に配布元コミットと導入ファイルのハッシュを記録します。これを含むBot用ファイルを導入先のデフォルトブランチに取り込むと、**Bot update notices** が毎日配布元のmainを確認し、Botファイルに変更があれば「Botをアップデートしますか？」というIssueを作ります。**Run workflow** でも確認できます。即時の配信ではなく定期確認です。既存導入先も、このワークフローと導入記録を一度導入する必要があります。記録がない状態では自動上書きしません。配布元リポジトリ自体では通知しません。
+
+通知Issueでの操作:
+
+- 更新する: write以上の利用者が `/ai-update` とコメントすると、更新PRを作り、そのリンクを返信します。
+- 見送る: 通知Issueを閉じます。同じコミットの再通知はしません。
+
+通知だけなら追加のSecretは不要です。更新PRではワークフロー自体も変更するため、導入先だけを対象とするfine-grained PATをActions Secret **`AI_BOT_UPDATE_TOKEN`** に登録してください。必要なrepository permissionsは **Contents: Read and write、Pull requests: Read and write、Workflows: Read and write** です。APIキーと同様にIssue・コメント・通常の入力欄へ貼らないでください。[GitHubのワークフロー更新権限](https://docs.github.com/en/rest/repos/contents#create-or-update-file-contents)
+
+更新用トークンは、権限とコマンドを確認した後の更新PR作成ジョブだけに渡します。配布元の取得は固定したpublicリポジトリへの認証なしアクセスです。配布元がprivateの場合は取得に失敗して停止します。
+
+更新対象はBotの配布マニフェストにある専用ファイルだけです。`config.json`、AIキー、対象プロジェクトのソースや `package.json` は変更しません。上流の各ファイルのGit blobハッシュと導入時の記録を照合し、Botファイルに利用者の独自変更や競合、シンボリックリンクがあれば停止します。上流のスクリプトやコードは更新処理中に実行しません。更新PRの差分とCIを人間がレビューしてからマージしてください。更新PRは自動マージ対象外です。

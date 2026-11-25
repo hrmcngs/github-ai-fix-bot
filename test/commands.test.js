@@ -140,3 +140,11 @@ test('no-reference command and configured default are persisted without reading 
     }
   }
 }));
+test('matrix worker routing uses the selected target rather than the blank parent input',()=>fixture(async({env})=>{
+  await writeFile('event.json',JSON.stringify({repository:{full_name:'a/b'},inputs:{target:'all',number:''}}));
+  const worker={...env,GITHUB_EVENT_NAME:'workflow_dispatch',AI_BOT_WORKER:'true',AI_BOT_NUMBER:'2',AI_BOT_TARGET:'issue',AI_BOT_RESULT:'comment',AI_BOT_REFERENCE:'off'};
+  await prepare(worker,github('/unused'));
+  let bundle=JSON.parse(await readFile('.work/bundle.json'));assert.equal(bundle.targets[0].number,2);assert.equal(bundle.cfg.referencePreviousPRs,false);
+  await prepareFix(worker,github('/unused'));
+  bundle=JSON.parse(await readFile('.work/fix-bundle.json'));assert.equal(bundle.targets[0].number,2);assert.equal(bundle.cfg.referencePreviousPRs,false);
+}));

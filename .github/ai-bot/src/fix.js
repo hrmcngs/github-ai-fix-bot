@@ -1,3 +1,4 @@
+import {workerEvent} from './bulk.js';
 import { readFile, writeFile, mkdir, appendFile, stat, chmod, rm } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -48,7 +49,7 @@ export async function prepareFix(env=process.env,ghArg) {
   const cfg=config(await json('.github/ai-bot/config.json'));
   const settings=fixConfig(cfg);
   if(!settings.enabled)return;
-  const event=await json(env.GITHUB_EVENT_PATH,2000000);
+  const event=workerEvent(env,await json(env.GITHUB_EVENT_PATH,2000000));
   cfg.referencePreviousPRs=referenceChoice(event,env,cfg);
   if(!['issues','workflow_dispatch','issue_comment'].includes(env.GITHUB_EVENT_NAME))throw new SafeError('ACCESS');
   if(env.GITHUB_EVENT_NAME==='issues' && (event.action!=='labeled' || event.label?.name!==settings.label))return;
@@ -136,7 +137,7 @@ export async function publishFix(env=process.env,ghArg) {
   const gh=ghArg || new GitHub(env.GITHUB_REPOSITORY,env.GH_TOKEN);
   const bundle=await json('.work/fix-bundle.json');bundleValid(bundle,env);
   const result=await json('.work/fix-plan.json',100000),verdict=await json('.work/fix-verdict.json',100000);
-  const event=await json(env.GITHUB_EVENT_PATH,2000000);
+  const event=workerEvent(env,await json(env.GITHUB_EVENT_PATH,2000000));
   const target=bundle.targets[0],n=number(target.number);
   const settings=fixConfig(bundle.cfg);
   if(!settings.enabled)throw new SafeError('ACCESS');

@@ -1,3 +1,4 @@
+import {workerEvent} from './bulk.js';
 import { readFile, writeFile, mkdir, appendFile, stat } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { config, number, allowedPath, scrub, fingerprint, prompt, cleanOutput, comment, SafeError, messages } from './core.js';
@@ -48,7 +49,7 @@ export async function collectFiles(gh, sha, cfg, targets) {
 export async function prepare(env = process.env, ghArg) {
   const gh = ghArg || new GitHub(env.GITHUB_REPOSITORY, env.GH_TOKEN);
   const cfg = config(await json('.github/ai-bot/config.json'));
-  const event = await json(env.GITHUB_EVENT_PATH,2000000);
+  const event = workerEvent(env,await json(env.GITHUB_EVENT_PATH,2000000));
   cfg.referencePreviousPRs=referenceChoice(event,env,cfg);
   const reportPR = isCommand(event,env,'/ai-report-pr') || (env.GITHUB_EVENT_NAME === 'workflow_dispatch' && event.inputs?.result === 'report-pr');
   if (env.GITHUB_EVENT_NAME === 'issue_comment' && !isCommand(event,env,'/ai-investigate') && !reportPR) return;
@@ -127,7 +128,7 @@ export async function publish(env = process.env, ghArg) {
   const gh = ghArg || new GitHub(env.GITHUB_REPOSITORY, env.GH_TOKEN);
   const bundle = await json('.work/bundle.json');
   const result = await json('.work/result.json', 200000);
-  const event = await json(env.GITHUB_EVENT_PATH,2000000);
+  const event = workerEvent(env,await json(env.GITHUB_EVENT_PATH,2000000));
   if (bundle.repo !== gh.repo || result.results?.length !== bundle.targets?.length || bundle.targets.length > 3) throw new SafeError('OUTPUT');
   const cfg = config(bundle.cfg);
   if(bundle.reportPR)return publishReport({env,gh,bundle,result,event,issueTarget});
