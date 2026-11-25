@@ -94,3 +94,21 @@ test('fix publication rechecks slash command and rejects redirected Issue target
   await writeFile('event.json',JSON.stringify({...eventFor('/ai-fix'),issue:{number:3}}));
   const redirected=github('/ai-fix');await assert.rejects(publishFix(env,redirected),e=>e.code==='ACCESS');assert.equal(redirected.calls.length,0);
 }));
+
+
+test('fix replies follow each new command; rerunning one command updates only its own reply',()=>fixture(async({env})=>{
+  await writeFile('event.json',JSON.stringify(eventFor('/ai-fix')));
+  await prepareFix(env,github('/ai-fix'));
+  await writeFile('.work/fix-plan.json',JSON.stringify({ok:false,reason:'模擬失敗'}));
+  await writeFile('.work/fix-verdict.json',JSON.stringify({ok:false,reason:'模擬失敗'}));
+  const old={id:456,user:{login:'github-actions[bot]',type:'Bot'},body:'<!-- ai-fix:issue:2 -->\n古いラベル実行の結果'};
+  const gh=github('/ai-fix');gh.list=async()=>[old];
+  await assert.rejects(publishFix(env,gh),e=>e.code==='VALIDATION');
+  const created=gh.calls.find(c=>c.method==='POST');
+  assert.equal(created.path,'/repos/a/b/issues/2/comments');
+  assert.ok(created.payload.body.startsWith('<!-- ai-fix:issue:2 --><!-- ai-command:123 -->'));
+  const own={...old,id:789,body:created.payload.body};
+  const rerun=github('/ai-fix');rerun.list=async()=>[old,own];
+  await assert.rejects(publishFix(env,rerun),e=>e.code==='VALIDATION');
+  assert.equal(rerun.calls.find(c=>c.method==='PATCH').path,'/repos/a/b/issues/comments/789');
+}));
