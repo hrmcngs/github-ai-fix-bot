@@ -31,6 +31,7 @@ write権限以上の利用者がIssueへ新しいコメントを投稿します�
 | --- | --- |
 | `/ai-investigate` | 調査結果をコメント |
 | `/ai-report-pr` | 調査結果をMarkdownのPRにし、Issueへリンクを返信 |
+| `/ai-review`（PRに投稿） | 差分をレビューして指摘をコメント |
 | `/ai-fix` | コード修正を検証し、成功時にPRを作成してリンクを返信 |
 
 PRに `/ai-fix` とコメントすると、競合の統合案を作成・検証します。既存JavaScript・Markdownの変更3ファイルまでに対応します。同じリポジトリなら元PRへ追加、forkなら別PRで提案します。[対応範囲](docs/guide.md#prの競合修正とラベル作成)
@@ -38,6 +39,8 @@ PRに `/ai-fix` とコメントすると、競合の統合案を作成・検証�
 必要なラベルは導入時に自動作成します（ログイン済みの `gh` と権限が必要）。自動マージの有効化は別の設定です。
 
 `ai-fix` ラベルでも修正を開始できます（`fix.enabled: true` が必要）。調査ラベル・定期調査は `mode: automatic` で有効になります。
+
+`/ai-review --ai all` で複数AIによるレビューもできます。Actionsの **AI PR review** からPR番号を指定しても起動できます。
 
 AIはActionsの `ai` 欄で選ぶか、`/ai-fix --ai claude` のように指定します。`--ai all` は登録済みAIの案をまとめます（最大4回のAPI利用・回答を統合担当AIへ送信）。調査・調査PR・PR競合修正でも使えます。
 

@@ -8,7 +8,7 @@ export function commandMatches(body,command){
   let ai=false,reference=false;
   while(parts.length){
     const flag=parts.shift();
-    if(flag==='--ai'&&!ai&&['/ai-fix','/ai-investigate','/ai-report-pr'].includes(command)){ai=true;if(!['tokyo','claude','codex','all'].includes(parts.shift()))return false;}
+    if(flag==='--ai'&&!ai&&['/ai-fix','/ai-investigate','/ai-report-pr','/ai-review'].includes(command)){ai=true;if(!['tokyo','claude','codex','all'].includes(parts.shift()))return false;}
     else if(['--reference','--no-reference'].includes(flag)&&!reference&&['/ai-fix','/ai-report-pr'].includes(command))reference=true;
     else return false;
   }
@@ -33,7 +33,7 @@ export function referenceChoice(event,env,cfg){
 export function isCommand(event, env, command, allowPR=false) {
   return env.GITHUB_EVENT_NAME === 'issue_comment'
     && event.action === 'created'
-    && (!event.issue?.pull_request || (allowPR&&command==='/ai-fix'))
+    && (!event.issue?.pull_request || (allowPR&&['/ai-fix','/ai-review'].includes(command)))
     && event.comment?.user?.type === 'User'
     && event.comment.user.login === env.GITHUB_ACTOR
     && typeof event.comment.body === 'string'
