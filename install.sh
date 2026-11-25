@@ -6,7 +6,7 @@ usage() {
   cat <<'HELP'
 Usage: bash install.sh [--directory PATH] [--ref COMMIT_SHA]
 
-Installs .github/ai-bot/ and .github/workflows/investigate.yml.
+Installs .github/ai-bot/ and the investigation/fix workflows.
 Default destination: root of the current Git repository.
 Default source: hrmcngs/github-ai-fix-bot main, resolved once to a commit.
 Existing config.json is preserved. Other differing files cause installation to stop.
@@ -20,6 +20,7 @@ main() {
   local -a files=(
     .github/ai-bot/.dockerignore
     .github/ai-bot/Dockerfile
+    .github/ai-bot/Dockerfile.verify
     .github/ai-bot/package.json
     .github/ai-bot/config.json
     .github/ai-bot/src/core.js
@@ -28,7 +29,11 @@ main() {
     .github/ai-bot/src/providers.js
     .github/ai-bot/src/broker.js
     .github/ai-bot/src/cli.js
+    .github/ai-bot/src/fix-core.js
+    .github/ai-bot/src/fix.js
+    .github/ai-bot/src/verify-container.js
     .github/workflows/investigate.yml
+    .github/workflows/fix.yml
   )
   while (($#)); do
     case "$1" in

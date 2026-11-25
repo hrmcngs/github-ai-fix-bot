@@ -55,9 +55,9 @@ export function prompt(bundle) {
 これは静的な文章調査です。テスト・静的解析・コードの実行は行っていません。安全性や修正成功を保証しないでください。
 --- 調査資料JSON ---\n${JSON.stringify(bundle)}\n--- 調査資料終了 ---`;
 }
-export function cleanOutput(text, secrets = []) {
+export function cleanOutput(text, secrets = [], limit = 18000) {
   if (typeof text !== 'string' || !text.trim() || Buffer.byteLength(text) > 100000) throw new SafeError('OUTPUT');
-  return scrub(text, secrets).slice(0, 18000).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '');
+  return scrub(text, secrets).slice(0, limit).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '');
 }
 export function comment(result, target, runUrl) {
   if (!/^[a-f0-9]{64}$/.test(target.fingerprint) || !/^[a-f0-9]{40}$/.test(target.sha) || !providers.includes(result.provider) || typeof result.ok !== 'boolean') throw new SafeError('OUTPUT');

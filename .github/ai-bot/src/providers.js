@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { SafeError, cleanOutput } from './core.js';
 import { statusCode } from './broker.js';
 
-export async function tokyo(text, key, fetcher = fetch) {
+export async function tokyo(text, key, fetcher = fetch, outputLimit = 18000) {
   if (!key) throw new SafeError('AUTH');
   try {
     const response = await fetcher('https://ai-api.metro.tokyo.lg.jp/api/v1/public/message', {
@@ -19,7 +19,7 @@ export async function tokyo(text, key, fetcher = fetch) {
     }
     const body = Buffer.concat(chunks).toString('utf8');
     let data; try { data = JSON.parse(body); } catch { throw new SafeError('OUTPUT'); }
-    return cleanOutput(data.message, [key]);
+    return cleanOutput(data.message, [key], outputLimit);
   } catch (error) { throw error instanceof SafeError ? error : new SafeError('NETWORK'); }
 }
 export function command(args, { input, env = {}, timeout = 300000 } = {}) {
@@ -34,7 +34,7 @@ export function command(args, { input, env = {}, timeout = 300000 } = {}) {
     child.stdin.on('error', () => {}); child.stdin.end(input);
   });
 }
-export async function agent(provider, model, text, key, run = command) {
+export async function agent(provider, model, text, key, run = command, outputLimit = 18000) {
   if (!key) throw new SafeError('AUTH');
   const id = `ai-bot-${randomBytes(8).toString('hex')}`;
   const network = `${id}-internal`, broker = `${id}-broker`, client = `${id}-client`;
@@ -50,7 +50,7 @@ export async function agent(provider, model, text, key, run = command) {
       catch { if (i===19) throw new SafeError('RUNTIME'); await new Promise(resolve=>setTimeout(resolve,100)); }
     }
     const result = await run(['run','--name',client,'--network',network,'--dns=127.0.0.1',...limits,'--env',`AI_PROVIDER=${provider}`,'--env',`AI_MODEL=${model}`,'--interactive',`ai-bot-${provider}:local`], { input: text });
-    return cleanOutput(result, [key]);
+    return cleanOutput(result, [key], outputLimit);
   } catch (error) {
     const logs = await run(['logs',broker]).catch(() => '');
     const status = logs.match(/AI_STATUS:(AUTH|LIMIT|NETWORK)/)?.[1];

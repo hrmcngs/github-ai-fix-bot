@@ -1,0 +1,54 @@
+// GitHub-hosted Docker smoke test; no AI call or API credentials are required.
+import assert from 'node:assert/strict';
+import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { validateFix } from '../.github/ai-bot/src/fix.js';
+const exec=promisify(execFile);
+const cfg=JSON.parse(await readFile(new URL('../.github/ai-bot/config.json',import.meta.url)));
+const original=process.cwd(),dir=await mkdtemp(join(tmpdir(),'ai-fix-container-'));
+const oldSource='export const add=(a,b)=>a-b;\n';
+const goodSource='export const add=(a,b)=>a+b;\n';
+try{
+  await mkdir(join(dir,'src'));await mkdir(join(dir,'.work'));await mkdir(join(dir,'home'));
+  await writeFile(join(dir,'package.json'),'{"type":"module"}');
+  await writeFile(join(dir,'src/add.js'),oldSource);
+  await writeFile(join(dir,'test.mjs'),`import assert from 'node:assert/strict';
+import {writeFileSync} from 'node:fs';
+import {connect} from 'node:net';
+import {add} from './src/add.js';
+assert.equal(add(2,3),5);
+assert.equal(process.getuid(),1000);
+for(const key of ['GH_TOKEN','GITHUB_TOKEN','AI_API_KEY','TOKYO_AI_API_KEY','ANTHROPIC_API_KEY','OPENAI_API_KEY'])assert.equal(process.env[key],undefined);
+assert.throws(()=>writeFileSync('/opt/ai-bot/verify-container.js','overwrite'));
+assert.throws(()=>writeFileSync('/workspace/test.mjs','overwrite'));
+assert.throws(()=>writeFileSync('/workspace/src/add.js','overwrite'));
+await new Promise((resolve,reject)=>{
+  const socket=connect(443,'1.1.1.1');
+  socket.setTimeout(1000);
+  socket.on('connect',()=>{socket.destroy();reject(new Error('Network isolation failed'));});
+  socket.on('error',()=>resolve());
+  socket.on('timeout',()=>{socket.destroy();resolve();});
+});
+`);
+  const gitEnv={PATH:process.env.PATH,HOME:join(dir,'home'),TMPDIR:dir};
+  const git=async(...args)=>exec('git',args,{cwd:dir,env:gitEnv});
+  await git('init','-q');await git('add','package.json','src/add.js','test.mjs');
+  await git('-c','user.name=Bot smoke test','-c','user.email=smoke@example.invalid','-c','commit.gpgsign=false','-c','core.hooksPath=/dev/null','commit','-qm','fixture');
+  const sha=(await git('rev-parse','HEAD')).stdout.trim();
+  const settings={...cfg,fix:{enabled:true,label:'ai-fix',commands:[['node','--test','test.mjs']]}};
+  const bundle={repo:'a/b',branch:'main',cfg:settings,targets:[{kind:'issue',number:1,sha}],context:{files:[{path:'src/add.js',content:oldSource}]}};
+  process.chdir(dir);
+  await writeFile('.work/fix-bundle.json',JSON.stringify(bundle));
+  const validate=async(content)=>{
+    await writeFile('.work/fix-plan.json',JSON.stringify({ok:true,plan:{confidence:'high',summary:'fixture',changes:[{path:'src/add.js',content}]}}));
+    await validateFix({GITHUB_REPOSITORY:'a/b'});
+    return JSON.parse(await readFile('.work/fix-verdict.json'));
+  };
+  assert.equal((await validate(goodSource)).ok,true,'A correct fix must pass the real offline Docker validator');
+  assert.equal((await validate('export const add=(a,b)=>0;\n')).ok,false,'A test failure must block publication');
+  assert.equal((await validate('export const add=;\n')).ok,false,'Invalid syntax must block publication');
+  console.log('Docker validation passed: correct fix, failing tests, syntax failure, no credentials, read-only toolchain and blocked network.');
+}finally{process.chdir(original);await rm(dir,{recursive:true,force:true});}
