@@ -16,12 +16,17 @@ export const messages = {
   INTERNAL: '調査を完了できませんでした。設定と実行環境を確認してください。'
 };
 export const providers = ['tokyo', 'claude', 'codex'];
+// Only presentation-only leaf modules may be opted into Bot self-fixes.
+// Credential, permission, validation and publication controllers are never listed here.
+export const BOT_EDITABLE_FILES = Object.freeze(['.github/ai-bot/src/markdown.js']);
 export function config(raw) {
   if (!raw || !['manual', 'automatic'].includes(raw.mode) || !providers.includes(raw.provider)) throw new SafeError('CONFIG');
   for (const [key, min, max] of [['maxFiles',1,30], ['maxFileBytes',100,32000], ['maxContextBytes',1000,128000], ['maxTargetsPerRun',1,3]]) {
     if (!Number.isInteger(raw[key]) || raw[key] < min || raw[key] > max) throw new SafeError('CONFIG');
   }
   if (!Array.isArray(raw.include) || !raw.include.length || raw.include.length > 30 || raw.include.some(p => typeof p !== 'string' || !/^[a-zA-Z0-9_./-]+$/.test(p) || p.startsWith('/') || p.split('/').some(x => x === '..' || x.startsWith('.')))) throw new SafeError('CONFIG');
+  const botFiles = raw.fix?.botFiles ?? [];
+  if (!Array.isArray(botFiles) || botFiles.length > BOT_EDITABLE_FILES.length || new Set(botFiles).size !== botFiles.length || botFiles.some(p => !BOT_EDITABLE_FILES.includes(p))) throw new SafeError('CONFIG');
   if (typeof raw.issueLabel !== 'string' || !/^[\w-]{1,50}$/.test(raw.issueLabel)) throw new SafeError('CONFIG');
   for (const p of ['claude','codex']) if (typeof raw.models?.[p] !== 'string' || !/^[a-zA-Z0-9._-]{1,100}$/.test(raw.models[p])) throw new SafeError('CONFIG');
   return raw;
@@ -31,6 +36,7 @@ export function number(value) {
   return Number(value);
 }
 export function allowedPath(path, cfg) {
+  if (BOT_EDITABLE_FILES.includes(path)) return Array.isArray(cfg.fix?.botFiles) && cfg.fix.botFiles.includes(path);
   if (typeof path !== 'string' || path.split('/').some(s => s.startsWith('.') || s === 'node_modules' || s === 'vendor' || s === 'dist')) return false;
   if (/(?:secret|credential|token|\.min\.|private.?key)/i.test(path)) return false;
   if (!(/\.(?:[cm]?js|jsx)$/.test(path) || /(?:^|\/)(?:package\.json|package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$/.test(path))) return false;
@@ -46,7 +52,7 @@ export function scrub(text, secrets = []) {
     .replace(/((?:api[_-]?key|access[_-]?token|password|secret)\s*["']?\s*[:=]\s*["']?)[^\s"',;]{8,}/gi, '$1[REDACTED]');
 }
 export function fingerprint(target, sha, cfg) {
-  return createHash('sha256').update(JSON.stringify({ target, sha, provider: cfg.provider, models: cfg.models, include: cfg.include, limits: [cfg.maxFiles,cfg.maxFileBytes,cfg.maxContextBytes] })).digest('hex');
+  return createHash('sha256').update(JSON.stringify({ target, sha, provider: cfg.provider, models: cfg.models, include: cfg.include, botFiles: cfg.fix?.botFiles ?? [], limits: [cfg.maxFiles,cfg.maxFileBytes,cfg.maxContextBytes] })).digest('hex');
 }
 export function prompt(bundle) {
   return `あなたはJavaScriptリポジトリの調査担当です。変更を実施せず、日本語で調査結果だけを回答してください。

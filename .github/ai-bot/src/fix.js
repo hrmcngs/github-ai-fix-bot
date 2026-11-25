@@ -37,8 +37,8 @@ async function openProposal(gh,n) {
   return prs.find(pr=>botOwned(pr) && pr.body?.startsWith(marker(n)) && pr.head?.repo?.full_name===gh.repo && pr.base?.repo?.full_name===gh.repo);
 }
 async function currentTarget(gh,n){return issueTarget(await gh.request(gh.path(`/issues/${number(n)}`)));}
-async function post(gh,n,body) {
-  const prefix=`${marker(n)}\n`;
+async function post(gh,n,body,commandId) {
+  const prefix=`${marker(n)}${commandId ? `<!-- ai-command:${number(commandId)} -->` : ''}\n`;
   const rows=await comments(gh,n);
   const existing=rows.find(row=>botOwned(row)&&row.body?.startsWith(prefix));
   if(existing)await gh.request(gh.path(`/issues/comments/${number(existing.id)}`),'PATCH',{body:prefix+body});
@@ -146,9 +146,10 @@ export async function publishFix(env=process.env,ghArg) {
   if(env.GITHUB_REF!==`refs/heads/${repo.default_branch}` || bundle.branch!==repo.default_branch)throw new SafeError('ACCESS');
   const permission=await gh.request(gh.path(`/collaborators/${encodeURIComponent(env.GITHUB_ACTOR)}/permission`));
   if(!['admin','maintain','write'].includes(permission.permission))throw new SafeError('ACCESS');
+  const commandId=env.GITHUB_EVENT_NAME==='issue_comment'?number(event.comment.id):undefined;
   const runUrl=`https://github.com/${gh.repo}/actions/runs/${number(env.GITHUB_RUN_ID)}`;
   const footer=`\n\n[Actionsの実行結果](${runUrl})\n\n自動マージは行いません。人間によるレビューが必要です。`;
-  const failure=async(reason)=>{const body=`修正PRは作成していません。\n\n${markdown(reason)}${footer}`;await post(gh,n,body);await summary(body,env);};
+  const failure=async(reason)=>{const body=`修正PRは作成していません。\n\n${markdown(reason)}${footer}`;await post(gh,n,body,commandId);await summary(body,env);};
   if(!result.ok || !verdict.ok){
     let reason=verdict.reason || result.reason || instructions;
     if(result.ok){try{const proposal=parsePlan(result.plan,bundle);if(proposal.summary!==reason)reason+=`\n\nAIの調査結果:\n${proposal.summary}`;}catch{}}
@@ -165,7 +166,7 @@ export async function publishFix(env=process.env,ghArg) {
     await failure(reasons.STALE);throw new SafeError('STALE');
   }
   const existing=await openProposal(gh,n);
-  if(existing){await post(gh,n,`修正PR #${number(existing.number)} が既にあります。${footer}`);return;}
+  if(existing){await post(gh,n,`修正PR #${number(existing.number)} が既にあります。${footer}`,commandId);return;}
   // Re-read original blobs before any writes. Every proposed path must remain a regular tracked file.
   const tree=await gh.request(gh.path(`/git/trees/${target.sha}?recursive=1`));
   if(tree.truncated)throw new SafeError('ACCESS');
@@ -189,7 +190,7 @@ export async function publishFix(env=process.env,ghArg) {
     await failure(reasons.PR);throw new SafeError('PR');
   }
   const body=`修正案をPR #${number(pr.number)} に作成しました。\n\n${markdown(plan.summary)}\n\n構文チェックと設定された検証は成功しました。変更内容とテストの妥当性をレビューしてください。${footer}`;
-  await post(gh,n,body);await summary(body,env);
+  await post(gh,n,body,commandId);await summary(body,env);
 }
 if(process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href){
   try{
