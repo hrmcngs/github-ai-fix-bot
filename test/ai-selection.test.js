@@ -27,9 +27,9 @@ test('all generates independent drafts then synthesizes with the preferred provi
   const all=chooseAI(cfg,event('/ai-fix --ai all'),env),calls=[];
   const keys={TOKYO_AI_API_KEY:'secret-tokyo-value',OPENAI_API_KEY:'secret-codex-value'};
   const mocks={tokyo:async(input,key)=>{calls.push({p:'tokyo',input,key});return calls.length===1?'Tokyo draft secret-codex-value':'Integrated result';},agent:async(p,model,input,key)=>{calls.push({p,input,key});return 'Codex draft';}};
-  assert.equal(await runAI(all,'Original request',keys,mocks),'Integrated result');
+  assert.equal(await runAI(all,'Original request secret-codex-value',keys,mocks),'Integrated result');
   assert.deepEqual(calls.map(c=>c.p),['tokyo','codex','tokyo']);
-  assert.equal(calls[0].key,keys.TOKYO_AI_API_KEY);assert.equal(calls[1].key,keys.OPENAI_API_KEY);
+  assert.ok(!calls[0].input.includes(keys.OPENAI_API_KEY));assert.equal(calls[0].key,keys.TOKYO_AI_API_KEY);assert.equal(calls[1].key,keys.OPENAI_API_KEY);
   assert.ok(calls[2].input.includes('Codex draft'));assert.ok(!calls[2].input.includes(keys.OPENAI_API_KEY));
   assert.ok(aiIdentity(all).includes('Codex'));assert.ok(aiIdentity(all).includes('統合担当'));
 });

@@ -1,4 +1,4 @@
-import {providers,SafeError,cleanOutput} from './core.js';
+import {providers,SafeError,cleanOutput,scrub} from './core.js';
 import {tokyo,agent} from './providers.js';
 export const keyNames={tokyo:'TOKYO_AI_API_KEY',claude:'ANTHROPIC_API_KEY',codex:'OPENAI_API_KEY'};
 export function chooseAI(cfg,event,env){
@@ -33,6 +33,7 @@ export async function runAI(cfg,input,env,{tokyo:tokyoCall=tokyo,agent:agentCall
   if(!Array.isArray(selected)||!selected.length||selected.length>3||new Set(selected).size!==selected.length||selected.some(p=>!providers.includes(p))||!selected.includes(cfg.provider))throw new SafeError('CONFIG');
   const keys=selected.map(p=>env[keyNames[p]]||(selected.length===1?env.AI_API_KEY:''));
   if(keys.some(k=>!k))throw new SafeError('AUTH');
+  input=scrub(input,keys);
   const call=async(p,text,cap)=>{
     const key=keys[selected.indexOf(p)];
     const output=p==='tokyo'?await tokyoCall(text,key,undefined,cap):await agentCall(p,cfg.models[p],text,key,undefined,cap);
