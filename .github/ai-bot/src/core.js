@@ -5,6 +5,9 @@ export class SafeError extends Error {
   constructor(code) { super(code); this.code = code; }
 }
 export const messages = {
+  STALE: '元ブランチまたはIssueが更新されました。新しい実行で再調査してください。',
+  PR: 'PRを作成できませんでした。ActionsによるPR作成の許可とリポジトリ権限を確認してください。',
+  NOTIFY: 'PRは作成済みですがIssueへの返信に失敗しました。再実行すると既存PRへのリンクを返信します。',
   AUTH: 'AIの認証に失敗しました。キーの有効期限・設定を確認し、更新後に新しく実行してください。',
   LIMIT: 'AIの利用上限またはレート制限に達しました。利用枠を確認してください。',
   NETWORK: 'AIとの通信に失敗しました。時間をおいて手動で再実行してください。',
