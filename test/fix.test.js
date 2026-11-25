@@ -87,7 +87,7 @@ test('validation only launches an offline secretless container and binds the ver
     if(args[0]==='ls-tree')return{stdout:`100644 blob ${blobSha} 34\tsrc/add.js\n`};
     await writeFile(args.find(a=>a.startsWith('--output=')).slice(9),'mock archive');return{stdout:''};
   };
-  const run=async(args,options)=>{calls.push({args,options});return '';};
+  const run=async(args,options)=>{calls.push({args,options});return args[0]==='run'?JSON.stringify({version:1,ok:true,stage:'complete',checks:[['node','--check','src/add.js'],...cfg.fix.commands].map(argv=>({argv,exitCode:0,detail:''}))}):'';};
   await validateFix({...env,AI_API_KEY:'dummy-key',GH_TOKEN:'dummy-github-token'},{run,git});
   const verdict=JSON.parse(await readFile('.work/fix-verdict.json'));
   assert.equal(verdict.ok,true);assert.equal(verdict.hash,planHash(plan()));
@@ -95,7 +95,7 @@ test('validation only launches an offline secretless container and binds the ver
   assert.ok(!JSON.stringify(calls).includes('dummy-key'));assert.ok(!JSON.stringify(calls).includes('dummy-github-token'));assert.ok(!docker.args.includes('--privileged'));
   await validateFix(env,{git,run:async(args)=>{if(args[0]==='run')throw new SafeError('RUNTIME');return '';}});
   assert.equal(JSON.parse(await readFile('.work/fix-verdict.json')).ok,false);
-  await validateFix(env,{git,run:async(args)=>args[0]==='run'?'OFFLINE_DEPENDENCIES':''});
+  await validateFix(env,{git,run:async(args)=>args[0]==='run'?JSON.stringify({version:1,ok:false,stage:'dependencies',checks:[]}):''});
   assert.match(JSON.parse(await readFile('.work/fix-verdict.json')).reason,/依存パッケージ/);
 }));
 test('successful validation creates a dedicated branch and PR, never changes main or merges',()=>fixture(async({env})=>{

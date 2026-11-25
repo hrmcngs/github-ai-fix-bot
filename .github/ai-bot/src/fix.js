@@ -11,7 +11,7 @@ import { tokyo, agent, command } from './providers.js';
 import { isCommand, requireCommand } from './commands.js';
 import { markdown } from './markdown.js';
 import { proposalLink, createLinkedProposal } from './proposals.js';
-import { editable, fixConfig, fixPrompt, parsePlan, planHash, fixId, literal } from './fix-core.js';
+import { editable, fixConfig, fixPrompt, parsePlan, planHash, fixId, literal, validationResult, validationFailure } from './fix-core.js';
 const exec = promisify(execFile);
 const marker = n => `<!-- ai-fix:issue:${number(n)} -->`;
 const instructions = '修正PRを作成できませんでした。Issueの具体性、許可パス、検証設定を確認してください。';
@@ -28,7 +28,7 @@ async function json(file, limit=1000000) {
 }
 async function save(file,data) { await mkdir('.work',{recursive:true});await writeFile(file,JSON.stringify(data),{mode:0o600}); }
 async function summary(text,env) { if(env.GITHUB_STEP_SUMMARY)await appendFile(env.GITHUB_STEP_SUMMARY,`${text}\n\n`); }
-function safeReason(error) {return reasons[error?.code] || messages[error?.code] || instructions;}
+function safeReason(error) {return error instanceof SafeError && error.validation ? validationFailure(error.validation) : reasons[error?.code] || messages[error?.code] || instructions;}
 function bundleValid(bundle,env) {
   config(bundle.cfg);fixConfig(bundle.cfg);
   if(bundle.repo!==env.GITHUB_REPOSITORY || !Array.isArray(bundle.targets) || bundle.targets.length!==1 || bundle.targets[0].kind!=='issue' || !/^[a-f0-9]{40}$/.test(bundle.targets[0].sha) || !Array.isArray(bundle.context?.files))throw new SafeError('OUTPUT');
@@ -119,10 +119,11 @@ export async function validateFix(env=process.env,{run=command,git=exec}={}) {
         await save(validation,{plan,commands:settings.commands,originals:bundle.context.files.filter(f=>plan.changes.some(c=>c.path===f.path))});
         await chmod(validation,0o644);
         container=`ai-fix-verify-${randomBytes(8).toString('hex')}`;
-        const output=await run(['run','--name',container,'--network=none','--read-only','--user=0:0','--cap-drop=ALL','--cap-add=SETUID','--cap-add=SETGID','--security-opt=no-new-privileges','--pids-limit=128','--memory=1g','--cpus=1','--ulimit','cpu=180:180','--ulimit','fsize=8388608:8388608','--ulimit','nofile=256:256','--tmpfs','/workspace:rw,nosuid,nodev,size=128m,uid=0,gid=0','--tmpfs','/tmp:rw,noexec,nosuid,nodev,size=64m,uid=1000,gid=1000','--mount',`type=bind,src=${archive},dst=/input/source.tar,readonly`,'--mount',`type=bind,src=${validation},dst=/input/validation.json,readonly`,'--log-driver=none','ai-bot-verify:local'],{timeout:540000});
-        // The container result is not interpreted as a command or report. Only exit status is used.
-        if(output.includes('OFFLINE_DEPENDENCIES'))throw new SafeError('DEPENDENCIES');
-        verdict={ok:true,hash:planHash(plan),sha:target.sha,commands:settings.commands};
+        const output=await run(['run','--name',container,'--network=none','--read-only','--user=0:0','--cap-drop=ALL','--cap-add=SETUID','--cap-add=SETGID','--security-opt=no-new-privileges','--pids-limit=128','--memory=1g','--cpus=1','--ulimit','cpu=180:180','--ulimit','fsize=8388608:8388608','--ulimit','nofile=256:256','--tmpfs','/workspace:rw,nosuid,nodev,size=128m,uid=0,gid=0','--tmpfs','/tmp:rw,exec,nosuid,nodev,size=64m,uid=1000,gid=1000','--mount',`type=bind,src=${archive},dst=/input/source.tar,readonly`,'--mount',`type=bind,src=${validation},dst=/input/validation.json,readonly`,'--log-driver=none','ai-bot-verify:local'],{timeout:540000});
+        const report=validationResult(output,plan,settings.commands);
+        verdict=report.ok
+          ? {ok:true,hash:planHash(plan),sha:target.sha,commands:settings.commands,checks:report.checks}
+          : {ok:false,code:report.stage==='dependencies'?'DEPENDENCIES':'VALIDATION',reason:validationFailure(report),checks:report.checks,stage:report.stage};
       }
     }
   }catch(error){verdict={ok:false,code:error.code==='DEPENDENCIES'?'DEPENDENCIES':'VALIDATION',reason:error.code==='DEPENDENCIES'?reasons.DEPENDENCIES:reasons.VALIDATION};}
@@ -162,7 +163,11 @@ export async function publishFix(env=process.env,ghArg) {
     await failure(reason);
     // Abstaining is an expected outcome, not a test failure. Verify the empty plan again.
     if(result.ok && verdict.code==='NO_CHANGES' && parsePlan(result.plan,bundle).changes.length===0)return;
-    throw new SafeError(verdict.code==='DEPENDENCIES'?'DEPENDENCIES':'VALIDATION');
+    const error=new SafeError(verdict.code==='DEPENDENCIES'?'DEPENDENCIES':'VALIDATION');
+    if(result.ok && verdict.stage && Array.isArray(verdict.checks)){
+      try{error.validation=validationResult(JSON.stringify({version:1,ok:false,stage:verdict.stage,checks:verdict.checks}),parsePlan(result.plan,bundle),settings.commands);}catch{}
+    }
+    throw error;
   }
   const plan=parsePlan(result.plan,bundle);
   if(!plan.changes.length || verdict.hash!==planHash(plan) || verdict.sha!==target.sha || JSON.stringify(verdict.commands)!==JSON.stringify(settings.commands))throw new SafeError('OUTPUT');

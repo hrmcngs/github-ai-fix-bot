@@ -274,3 +274,13 @@ PRを作成するには、GitHubの **Allow GitHub Actions to create and approve
 **現在のprivateリポジトリでは、保護ルールAPIがプラン非対応を返しています。** GitHub公式のauto-mergeと保護ブランチは、privateではGitHub Pro/Team等の対応プランが必要です。この条件が満たせない場合は自動マージしません。公開範囲やプラン、リポジトリ設定をBotが変更することはありません。
 
 公式仕様: [自動マージ](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/automatically-merging-a-pull-request)、[保護ブランチ](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches)。
+
+### 検証で失敗したコマンドを確認する
+
+修正用コンテナは、構文チェックと設定されたコマンドを順番に実行し、コマンド名・終了コード・安全なエラー分類を検証結果に記録します。失敗時はIssueとpublishログに、たとえば `npm test` が失敗したことを表示します。テストの生ログや環境変数、例外本文は公開しません。
+
+テストが一時ディレクトリへ作成する実行用ヘルパーにも対応するため、検証コンテナの `/tmp` 内ではファイル実行を許可します。対象コードの実行は、引き続きSecretなし・ネットワークなし・非root・資源制限付きのコンテナ内だけです。ソースとテスト、検証プログラムは読み取り専用を維持します。
+
+CIでは小さなフィクスチャだけでなく、このリポジトリ全体にSQL表示の修正を適用し、旧noexec設定での失敗と新設定での `npm run check` / `npm test` 成功を比較します。
+
+npmのユーザー設定と全体設定には別々の空ファイルを使用し、同じ/dev/nullを指定した場合に起きる設定の重複読み込みエラーを防ぎます。設定ファイルは検証用イメージ内で読み取り専用です。

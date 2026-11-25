@@ -53,3 +53,25 @@ export function literal(text) {
   const fence='`'.repeat(Math.max(3,...[...s.matchAll(/`+/g)].map(m=>m[0].length+1)));
   return `${fence}text\n${s}\n${fence}`;
 }
+
+export function validationResult(output,plan,commands) {
+  let report;
+  try{report=JSON.parse(output);}catch{throw new SafeError('VALIDATION');}
+  const expected=[...plan.changes.map(c=>['node','--check',c.path]),...commands];
+  if(report?.version!==1 || typeof report.ok!=='boolean' || !['setup','extract','apply','dependencies','syntax','command','complete'].includes(report.stage) || !Array.isArray(report.checks) || report.checks.length>expected.length)throw new SafeError('VALIDATION');
+  for(const [i,check]of report.checks.entries()){
+    if(JSON.stringify(check.argv)!==JSON.stringify(expected[i]) || !(check.exitCode===null || Number.isInteger(check.exitCode)&&check.exitCode>=0&&check.exitCode<=255) || !['','TIMEOUT','PERMISSION_DENIED','MISSING_TOOL','CONFIG_CONFLICT'].includes(check.detail))throw new SafeError('VALIDATION');
+    if(i<report.checks.length-1 && (check.exitCode!==0||check.detail))throw new SafeError('VALIDATION');
+  }
+  if(report.ok && (report.stage!=='complete'||report.checks.length!==expected.length||report.checks.some(c=>c.exitCode!==0||c.detail)))throw new SafeError('VALIDATION');
+  return report;
+}
+export function validationFailure(report) {
+  if(report.stage==='dependencies')return '依存パッケージをオフライン環境に用意できないため、検証を停止しました。';
+  const failed=report.checks.at(-1);
+  if(failed && (failed.exitCode!==0||failed.detail)){
+    const detail={CONFIG_CONFLICT:'（npm設定ファイルの競合）',TIMEOUT:'（時間制限）',PERMISSION_DENIED:'（隔離環境での実行権限エラー）',MISSING_TOOL:'（必要なコマンドまたは実行ファイルがありません）'}[failed.detail]||'';
+    return `検証コマンド \`${scrub(failed.argv.join(' '))}\` が失敗しました。終了コード: ${failed.exitCode??'取得できません'}${detail}。PRは作成していません。`;
+  }
+  return {setup:'検証コンテナの初期設定',extract:'元コミットのアーカイブ展開',apply:'修正内容と元ファイルの照合',syntax:'変更ファイルの構文チェック',command:'指定した検証',complete:'検証結果の確認'}[report.stage]+'で失敗しました。PRは作成していません。';
+}

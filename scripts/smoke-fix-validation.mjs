@@ -18,9 +18,12 @@ try{
   await writeFile(join(dir,'test.mjs'),`import assert from 'node:assert/strict';
 import {writeFileSync} from 'node:fs';
 import {connect} from 'node:net';
+import {spawnSync} from 'node:child_process';
 import {add} from './src/add.js';
 assert.equal(add(2,3),5);
 assert.equal(process.getuid(),1000);
+writeFileSync('/tmp/local-helper.sh','#!/bin/sh\\nexit 0\\n',{mode:0o755});
+assert.equal(spawnSync('/tmp/local-helper.sh').status,0);
 for(const key of ['GH_TOKEN','GITHUB_TOKEN','AI_API_KEY','TOKYO_AI_API_KEY','ANTHROPIC_API_KEY','OPENAI_API_KEY'])assert.equal(process.env[key],undefined);
 assert.throws(()=>writeFileSync('/opt/ai-bot/verify-container.js','overwrite'));
 assert.throws(()=>writeFileSync('/workspace/test.mjs','overwrite'));
@@ -47,7 +50,9 @@ await new Promise((resolve,reject)=>{
     await validateFix({GITHUB_REPOSITORY:'a/b'});
     return JSON.parse(await readFile('.work/fix-verdict.json'));
   };
-  assert.equal((await validate(goodSource)).ok,true,'A correct fix must pass the real offline Docker validator');
+  const passing=await validate(goodSource);
+  console.log('Fixture verifier result:',JSON.stringify(passing));
+  assert.equal(passing.ok,true,'A correct fix must pass the real offline Docker validator');
   assert.equal((await validate('export const add=(a,b)=>0;\n')).ok,false,'A test failure must block publication');
   assert.equal((await validate('export const add=;\n')).ok,false,'Invalid syntax must block publication');
   console.log('Docker validation passed: correct fix, failing tests, syntax failure, no credentials, read-only toolchain and blocked network.');

@@ -1,8 +1,9 @@
-// Trusted verifier. Source and AI changes execute only inside a secretless offline container.
+// Trusted verifier. Never emit target-controlled logs, bodies, environment or exception messages.
 import { readFile, writeFile, lstat, mkdir, readdir, chmod } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
-const env={ PATH:'/usr/local/bin:/usr/bin:/bin', HOME:'/tmp/home', TMPDIR:'/tmp', CI:'true', npm_config_cache:'/tmp/npm', npm_config_userconfig:'/dev/null', npm_config_globalconfig:'/dev/null', npm_config_offline:'true', npm_config_ignore_scripts:'true', npm_config_update_notifier:'false' };
+const env={ PATH:'/usr/local/bin:/usr/bin:/bin', HOME:'/tmp/home', TMPDIR:'/tmp', CI:'true', npm_config_cache:'/tmp/npm', npm_config_userconfig:'/opt/ai-bot/npm-user.npmrc', npm_config_globalconfig:'/opt/ai-bot/npm-global.npmrc', npm_config_offline:'true', npm_config_ignore_scripts:'true', npm_config_update_notifier:'false' };
+const report={version:1,ok:false,stage:'setup',checks:[]};
 async function readonly(dir) {
   for(const entry of await readdir(dir,{withFileTypes:true})) {
     const file=path.join(dir,entry.name);
@@ -13,13 +14,27 @@ async function readonly(dir) {
   }
   await chmod(dir,0o555);
 }
-function run(argv) {
+function run(argv,record=false) {
   const result=spawnSync(argv[0],argv.slice(1),{cwd:'/workspace',env,timeout:90000,maxBuffer:1000000,stdio:['ignore','pipe','pipe']});
-  return result.status===0 && !result.error;
+  const ok=result.status===0 && !result.error;
+  if(record){
+    const output=String(result.stderr||'')+String(result.stdout||'');
+    let detail='';
+    if(!ok){
+      if(/double-loading config/i.test(output))detail='CONFIG_CONFLICT';
+      else if(result.error?.code==='ETIMEDOUT'||result.signal==='SIGTERM')detail='TIMEOUT';
+      else if(/EACCES|Permission denied/i.test(output)||result.error?.code==='EACCES')detail='PERMISSION_DENIED';
+      else if(/ENOENT|not found|is required/i.test(output)||result.error?.code==='ENOENT')detail='MISSING_TOOL';
+    }
+    report.checks.push({argv,exitCode:result.status,detail});
+  }
+  return ok;
 }
 try {
   await mkdir('/tmp/home',{recursive:true});
-  if(!run(['tar','--no-same-owner','--no-same-permissions','-xf','/input/source.tar','-C','/workspace','--exclude=.git','--exclude=.work','--exclude=node_modules'])) throw new Error();
+  report.stage='extract';
+  if(!run(['tar','--no-same-owner','--no-same-permissions','-xf','/input/source.tar','-C','/workspace','--exclude=.git','--exclude=.work','--exclude=node_modules']))throw new Error();
+  report.stage='apply';
   const data=JSON.parse(await readFile('/input/validation.json','utf8'));
   for(const change of data.plan.changes) {
     const pieces=change.path.split('/');let current='/workspace';
@@ -34,17 +49,19 @@ try {
     if(!expected || original!==expected.content)throw new Error();
     await writeFile(current,change.content);
   }
-  // Dependencies cannot be fetched in the offline validator. Fail closed instead of skipping tests.
+  report.stage='dependencies';
   try {
     const pkg=JSON.parse(await readFile('/workspace/package.json','utf8'));
-    if(Object.keys({...pkg.dependencies,...pkg.devDependencies,...pkg.optionalDependencies}).length) {
-      process.stdout.write('OFFLINE_DEPENDENCIES');process.exit(0);
-    }
+    if(Object.keys({...pkg.dependencies,...pkg.devDependencies,...pkg.optionalDependencies}).length)throw new Error();
   } catch(error) { if(error.code!=='ENOENT')throw error; }
+  report.stage='setup';
   await chmod('/tmp/home',0o777);
   await readonly('/workspace');
-  // Only trusted extraction/patch application runs as container root. Test code cannot rewrite tests.
   process.setgroups([]);process.setgid(1000);process.setuid(1000);
-  for(const change of data.plan.changes) if(!run(['node','--check',change.path]))throw new Error();
-  for(const command of data.commands) if(!run(command))throw new Error();
-} catch { process.exitCode=1; }
+  report.stage='syntax';
+  for(const change of data.plan.changes)if(!run(['node','--check',change.path],true))throw new Error();
+  report.stage='command';
+  for(const command of data.commands)if(!run(command,true))throw new Error();
+  report.ok=true;report.stage='complete';
+} catch { /* Only trusted stage names and bounded command statuses are returned. */ }
+process.stdout.write(JSON.stringify(report));

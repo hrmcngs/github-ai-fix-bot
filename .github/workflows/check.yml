@@ -50,3 +50,5 @@ jobs:
         run: docker build -f .github/ai-bot/Dockerfile.verify -t ai-bot-verify:local .github/ai-bot
       - name: Test real validation and isolation with local fixtures
         run: node scripts/smoke-fix-validation.mjs
+      - name: Reproduce and verify the complete repository validation
+        run: node scripts/smoke-repo-validation.mjs
