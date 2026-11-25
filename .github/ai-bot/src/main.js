@@ -3,6 +3,7 @@ import { pathToFileURL } from 'node:url';
 import { config, number, allowedPath, scrub, fingerprint, prompt, cleanOutput, comment, SafeError, messages } from './core.js';
 import { GitHub, comments, reportIssue, completed, botOwned, REPORT_MARKER } from './github.js';
 import { tokyo, agent } from './providers.js';
+import { isCommand, requireCommand } from './commands.js';
 
 async function json(path, max = 1000000) {
   if ((await stat(path)).size > max) throw new SafeError('CONFIG');
@@ -40,12 +41,13 @@ export async function collectFiles(gh, sha, cfg, targets) {
     if (used+Buffer.byteLength(content) > cfg.maxContextBytes) continue;
     files.push({ path: f.path, content }); used += Buffer.byteLength(content);
   }
-  return { files, omittedFiles: candidates.length-files.length, note: '許可パス・容量・件数の制限で一部だけを取得。Issueコメントや外部URLは取得していません。' };
+  return { files, omittedFiles: candidates.length-files.length, note: '許可パス・容量・件数の制限で一部だけを取得。Issueコメントや外部URLは調査資料に含めていません。' };
 }
 export async function prepare(env = process.env, ghArg) {
   const gh = ghArg || new GitHub(env.GITHUB_REPOSITORY, env.GH_TOKEN);
   const cfg = config(await json('.github/ai-bot/config.json'));
   const event = await json(env.GITHUB_EVENT_PATH,2000000);
+  if (env.GITHUB_EVENT_NAME === 'issue_comment' && !isCommand(event,env,'/ai-investigate')) return;
   const repo = await gh.request(gh.path());
   if (repo.private && env.ALLOW_PRIVATE_REPOSITORY !== 'true') throw new SafeError('PRIVATE');
   if (env.GITHUB_EVENT_NAME === 'schedule' && cfg.mode !== 'automatic') return;
@@ -58,7 +60,7 @@ export async function prepare(env = process.env, ghArg) {
   if (!/^[a-f0-9]{40}$/.test(sha)) throw new SafeError('ACCESS');
   let targets = [];
   const trigger = env.GITHUB_EVENT_NAME;
-  if (!['workflow_dispatch','issues','schedule'].includes(trigger)) throw new SafeError('ACCESS');
+  if (!['workflow_dispatch','issues','schedule','issue_comment'].includes(trigger)) throw new SafeError('ACCESS');
   if (trigger !== 'schedule') {
     const permission = await gh.request(gh.path(`/collaborators/${encodeURIComponent(env.GITHUB_ACTOR)}/permission`));
     if (!['admin','maintain','write'].includes(permission.permission)) throw new SafeError('ACCESS');
@@ -67,6 +69,9 @@ export async function prepare(env = process.env, ghArg) {
     const kind = event.inputs?.target, n = number(event.inputs?.number);
     if (!['issue','dependabot'].includes(kind)) throw new SafeError('CONFIG');
     targets = [kind === 'issue' ? issueTarget(await gh.request(gh.path(`/issues/${n}`))) : alertTarget(await gh.request(gh.path(`/dependabot/alerts/${n}`)))];
+  } else if (trigger === 'issue_comment') {
+    const n = await requireCommand(gh,event,env,'/ai-investigate');
+    targets = [issueTarget(await gh.request(gh.path(`/issues/${n}`)))];
   } else if (trigger === 'issues') {
     if (cfg.mode !== 'automatic' || event.action !== 'labeled' || event.label?.name !== cfg.issueLabel) return;
     const issue = await gh.request(gh.path(`/issues/${number(event.issue?.number)}`));
@@ -126,6 +131,12 @@ export async function publish(env = process.env, ghArg) {
     if (env.GITHUB_EVENT_NAME === 'workflow_dispatch' && (event.inputs?.target !== target.kind || number(event.inputs?.number) !== n)) throw new SafeError('ACCESS');
     if (env.GITHUB_EVENT_NAME === 'issues' && (target.kind !== 'issue' || number(event.issue?.number) !== n)) throw new SafeError('ACCESS');
     if (env.GITHUB_EVENT_NAME === 'schedule' && target.kind !== 'dependabot') throw new SafeError('ACCESS');
+    if (env.GITHUB_EVENT_NAME === 'issue_comment') {
+      if (target.kind !== 'issue' || number(event.issue?.number) !== n) throw new SafeError('ACCESS');
+      await requireCommand(gh,event,env,'/ai-investigate');
+      const permission = await gh.request(gh.path(`/collaborators/${encodeURIComponent(env.GITHUB_ACTOR)}/permission`));
+      if (!['admin','maintain','write'].includes(permission.permission)) throw new SafeError('ACCESS');
+    }
     if (result.results[i].provider !== cfg.provider) throw new SafeError('OUTPUT');
     const body = comment(result.results[i],target,`https://github.com/${gh.repo}/actions/runs/${env.GITHUB_RUN_ID}`);
     let issueNumber = n;

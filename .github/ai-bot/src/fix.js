@@ -8,6 +8,7 @@ import { config, number, fingerprint, SafeError, messages } from './core.js';
 import { GitHub, botOwned, comments } from './github.js';
 import { collectFiles, issueTarget } from './main.js';
 import { tokyo, agent, command } from './providers.js';
+import { isCommand, requireCommand } from './commands.js';
 import { editable, fixConfig, fixPrompt, parsePlan, planHash, fixId, literal } from './fix-core.js';
 const exec = promisify(execFile);
 const marker = n => `<!-- ai-fix:issue:${number(n)} -->`;
@@ -48,14 +49,17 @@ export async function prepareFix(env=process.env,ghArg) {
   const settings=fixConfig(cfg);
   if(!settings.enabled)return;
   const event=await json(env.GITHUB_EVENT_PATH,2000000);
-  if(!['issues','workflow_dispatch'].includes(env.GITHUB_EVENT_NAME))throw new SafeError('ACCESS');
+  if(!['issues','workflow_dispatch','issue_comment'].includes(env.GITHUB_EVENT_NAME))throw new SafeError('ACCESS');
   if(env.GITHUB_EVENT_NAME==='issues' && (event.action!=='labeled' || event.label?.name!==settings.label))return;
+  if(env.GITHUB_EVENT_NAME==='issue_comment' && !isCommand(event,env,'/ai-fix'))return;
   const repo=await gh.request(gh.path());
   if(repo.private && env.ALLOW_PRIVATE_REPOSITORY!=='true')throw new SafeError('PRIVATE');
   if(event.repository?.full_name!==gh.repo || env.GITHUB_REF!==`refs/heads/${repo.default_branch}`)throw new SafeError('ACCESS');
   const permission=await gh.request(gh.path(`/collaborators/${encodeURIComponent(env.GITHUB_ACTOR)}/permission`));
   if(!['admin','maintain','write'].includes(permission.permission))throw new SafeError('ACCESS');
-  const n=number(env.GITHUB_EVENT_NAME==='issues'?event.issue?.number:event.inputs?.number);
+  const n=env.GITHUB_EVENT_NAME==='issue_comment'
+    ? await requireCommand(gh,event,env,'/ai-fix')
+    : number(env.GITHUB_EVENT_NAME==='issues'?event.issue?.number:event.inputs?.number);
   const issue=await gh.request(gh.path(`/issues/${n}`));
   const target=issueTarget(issue);
   if(env.GITHUB_EVENT_NAME==='issues' && !issue.labels.some(l=>l.name===settings.label))return;
@@ -132,6 +136,9 @@ export async function publishFix(env=process.env,ghArg) {
   if(event.repository?.full_name!==gh.repo)throw new SafeError('ACCESS');
   if(env.GITHUB_EVENT_NAME==='issues') {
     if(event.action!=='labeled' || event.label?.name!==settings.label || number(event.issue?.number)!==n)throw new SafeError('ACCESS');
+  }else if(env.GITHUB_EVENT_NAME==='issue_comment'){
+    if(number(event.issue?.number)!==n)throw new SafeError('ACCESS');
+    await requireCommand(gh,event,env,'/ai-fix');
   }else if(env.GITHUB_EVENT_NAME!=='workflow_dispatch' || number(event.inputs?.number)!==n)throw new SafeError('ACCESS');
   const repo=await gh.request(gh.path());
   if(repo.private && env.ALLOW_PRIVATE_REPOSITORY!=='true')throw new SafeError('PRIVATE');
