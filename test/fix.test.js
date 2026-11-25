@@ -133,3 +133,16 @@ test('PR API failure removes its proposal branch and reports the error',()=>fixt
   assert.ok(gh.calls.some(c=>c.method==='DELETE' && c.path.includes('/git/refs/heads/ai-fix/issue-2-')));
   assert.ok(gh.calls.some(c=>c.method==='POST' && c.path.endsWith('/issues/2/comments')));
 }));
+
+
+test('no-change proposal reports its reason without a false test failure or any Git writes',()=>fixture(async({env})=>{
+  await artifacts({changes:{confidence:'low',summary:'編集できるJavaScriptファイルがありません。',changes:[]}});
+  await validateFix(env,{run:async()=>assert.fail('No proposal must not run tests')});
+  const verdict=JSON.parse(await readFile('.work/fix-verdict.json'));
+  assert.equal(verdict.code,'NO_CHANGES');
+  const gh=github();await publishFix(env,gh);
+  const writes=gh.calls.filter(c=>c.method!=='GET');
+  assert.deepEqual(writes.map(c=>c.path),['/repos/a/b/issues/2/comments']);
+  assert.match(writes[0].body.body,/JavaScriptファイルがありません/);
+  assert.ok(!writes[0].body.body.includes('構文チェックまたは指定した検証が失敗'));
+}));
