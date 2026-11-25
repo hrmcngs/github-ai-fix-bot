@@ -95,7 +95,7 @@ export async function validateFix(env=process.env,{run=command,git=exec}={}) {
     if(!result.ok)verdict={ok:false,reason:result.reason};
     else {
       const plan=parsePlan(result.plan,bundle);
-      if(!plan.changes.length)verdict={ok:false,reason:plan.summary};
+      if(!plan.changes.length)verdict={ok:false,code:'NO_CHANGES',reason:plan.summary};
       else {
         const settings=fixConfig(bundle.cfg);
         const archive=resolve('.work/fix-source.tar'),validation=resolve('.work/fix-validation.json');
@@ -114,7 +114,7 @@ export async function validateFix(env=process.env,{run=command,git=exec}={}) {
         verdict={ok:true,hash:planHash(plan),sha:target.sha,commands:settings.commands};
       }
     }
-  }catch(error){verdict={ok:false,reason:error.code==='DEPENDENCIES'?reasons.DEPENDENCIES:reasons.VALIDATION};}
+  }catch(error){verdict={ok:false,code:error.code==='DEPENDENCIES'?'DEPENDENCIES':'VALIDATION',reason:error.code==='DEPENDENCIES'?reasons.DEPENDENCIES:reasons.VALIDATION};}
   finally{
     if(container)await run(['rm','--force',container]).catch(()=>{});
     await rm('.work/fix-source.tar',{force:true});await rm('.work/fix-validation.json',{force:true});
@@ -144,7 +144,10 @@ export async function publishFix(env=process.env,ghArg) {
   if(!result.ok || !verdict.ok){
     let reason=verdict.reason || result.reason || instructions;
     if(result.ok){try{const proposal=parsePlan(result.plan,bundle);if(proposal.summary!==reason)reason+=`\n\nAIの調査結果:\n${proposal.summary}`;}catch{}}
-    await failure(reason);throw new SafeError('VALIDATION');
+    await failure(reason);
+    // Abstaining is an expected outcome, not a test failure. Verify the empty plan again.
+    if(result.ok && verdict.code==='NO_CHANGES' && parsePlan(result.plan,bundle).changes.length===0)return;
+    throw new SafeError(verdict.code==='DEPENDENCIES'?'DEPENDENCIES':'VALIDATION');
   }
   const plan=parsePlan(result.plan,bundle);
   if(!plan.changes.length || verdict.hash!==planHash(plan) || verdict.sha!==target.sha || JSON.stringify(verdict.commands)!==JSON.stringify(settings.commands))throw new SafeError('OUTPUT');
