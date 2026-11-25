@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, writeFile, rm, access } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {issueTarget} from '../.github/ai-bot/src/main.js';
+import {revisionMarker} from '../.github/ai-bot/src/proposal-state.js';
 import { fingerprint, SafeError } from '../.github/ai-bot/src/core.js';
 import { fixConfig, parsePlan, planHash } from '../.github/ai-bot/src/fix-core.js';
 import { prepareFix, generateFix, validateFix, publishFix } from '../.github/ai-bot/src/fix.js';
@@ -11,7 +13,7 @@ const sha='a'.repeat(40),blobSha='b'.repeat(40);
 const source='export const add = (a,b) => a-b;\n';
 const fixed='export const add = (a,b) => a+b;\n';
 const issue={number:2,state:'open',title:'Fix addition',body:'add(2,3) should return 5',labels:[{name:'ai-fix'}]};
-const target={kind:'issue',number:2,title:issue.title,body:issue.body};
+const target=issueTarget(issue);
 function bundle(){return {repo:'a/b',branch:'main',cfg,targets:[{...target,sha,fingerprint:fingerprint(target,sha,cfg)}],context:{files:[{path:'src/add.js',content:source}]}};}
 function plan(){return {confidence:'high',summary:'加算を修正します。',changes:[{path:'src/add.js',content:fixed}]};}
 async function fixture(fn){
@@ -69,7 +71,7 @@ test('trusted label creates immutable preparation; foreign label and untrusted a
   await prepareFix(env,denied);assert.equal(denied.calls.length,0);
 }));
 test('existing open bot PR suppresses a new AI proposal',()=>fixture(async({env})=>{
-  const gh=github({prs:[{number:9,user:{login:'github-actions[bot]',type:'Bot'},body:'<!-- ai-fix:issue:2 -->',head:{repo:{full_name:'a/b'}},base:{repo:{full_name:'a/b'}}}]});
+  const gh=github({prs:[{number:9,user:{login:'github-actions[bot]',type:'Bot'},body:`<!-- ai-fix:issue:2 -->\n${revisionMarker(issue)}`,head:{ref:'ai-fix/issue-2-0123456789ab-123',repo:{full_name:'a/b'}},base:{repo:{full_name:'a/b'}}}]});
   await prepareFix(env,gh);await assert.rejects(access('.work/fix-bundle.json'));
 }));
 test('generation accepts bounded JSON and masks failures without leaking provider errors',()=>fixture(async({env})=>{
@@ -145,4 +147,13 @@ test('no-change proposal reports its reason without a false test failure or any 
   assert.deepEqual(writes.map(c=>c.path),['/repos/a/b/issues/2/comments']);
   assert.match(writes[0].body.body,/JavaScriptファイルがありません/);
   assert.ok(!writes[0].body.body.includes('構文チェックまたは指定した検証が失敗'));
+}));
+test('updated Issue bypasses an old proposal and includes its allowed patch as reference',()=>fixture(async({env})=>{
+  const old={number:8,user:{login:'github-actions[bot]',type:'Bot'},body:`<!-- ai-fix:issue:2 -->\n${revisionMarker({...issue,body:'old'})}`,head:{ref:'ai-fix/issue-2-0123456789ab-123',repo:{full_name:'a/b'}},base:{repo:{full_name:'a/b'}}};
+  const gh=github({prs:[old]}),list=gh.list;
+  gh.list=async path=>path.endsWith('/pulls/8/files')?[{filename:'src/add.js',patch:'-old\n+new'}]:list(path);
+  await prepareFix(env,gh);
+  const prepared=JSON.parse(await readFile('.work/fix-bundle.json'));
+  assert.equal(prepared.context.previousProposals[0].number,8);
+  assert.equal(prepared.targets[0].revision,issueTarget(issue).revision);
 }));

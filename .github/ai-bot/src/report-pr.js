@@ -4,10 +4,9 @@ import {botOwned,comments} from './github.js';
 import {requireCommand} from './commands.js';
 import {markdown} from './markdown.js';
 import {createLinkedProposal,proposalLink} from './proposals.js';
+import {currentProposal,previousLinks,revisionMarker,referenceMarker} from './proposal-state.js';
 const marker=n=>`<!-- ai-report:issue:${number(n)} -->`;
-export async function openReport(gh,n){
-  return (await gh.list(gh.path('/pulls?state=open'))).find(pr=>botOwned(pr)&&pr.body?.startsWith(marker(n))&&pr.head?.repo?.full_name===gh.repo&&pr.base?.repo?.full_name===gh.repo);
-}
+export const openReport=(gh,issue,reference)=>currentProposal(gh,'report',issue,reference);
 export function reportFile(bundle,text){
   const target=bundle.targets[0],n=number(target.number);
   return {path:`reports/ai/issue-${n}.md`,content:`${marker(n)}\n# Issue #${n} のAI調査結果\n\n対象: https://github.com/${bundle.repo}/issues/${n}\n\nAI: ${bundle.cfg.provider} / 対象SHA: \`${target.sha}\`\n\nAIによる静的調査です。コード修正・テストは行っていません。人間による確認が必要です。\n\n${markdown(cleanOutput(text))}\n`};
@@ -51,19 +50,20 @@ export async function publishReport({env,gh,bundle,result,event,issueTarget}){
     else await gh.request(gh.path(`/issues/${n}/comments`),'POST',{body:prefix+body+footer});
     if(env.GITHUB_STEP_SUMMARY)await appendFile(env.GITHUB_STEP_SUMMARY,body+footer+'\n');
   };
-  const existing=await openReport(gh,n);
+  const current=issueTarget(await gh.request(gh.path(`/issues/${n}`)));
+  if(fingerprint(current,target.sha,bundle.cfg)!==target.fingerprint){await notify(messages.STALE);throw new SafeError('STALE');}
+  const existing=await openReport(gh,target,bundle.cfg.referencePreviousPRs);
   if(existing){await notify(`調査結果の ${proposalLink(gh,existing.number)} が既にあります。重複作成はしていません。`);return;}
   const analysis=result.results[0];
   if(!analysis.ok){await notify(`調査結果のPRは作成していません。\n\n${markdown(cleanOutput(analysis.text))}`);throw new SafeError('OUTPUT');}
   // A reused PR might have been closed while this run was queued: never publish the placeholder.
   if(bundle.existingReportPR){await notify('既存の調査PRが閉じられました。新しいコマンドで再調査してください。');throw new SafeError('STALE');}
   const ref=await gh.request(gh.path(`/git/ref/heads/${encodeURIComponent(repo.default_branch)}`));
-  const current=issueTarget(await gh.request(gh.path(`/issues/${n}`)));
   if(ref.object?.sha!==target.sha||fingerprint(current,target.sha,bundle.cfg)!==target.fingerprint){await notify(messages.STALE);throw new SafeError('STALE');}
   const file=reportFile(bundle,analysis.text);
   try{await reportDestination(gh,target.sha,n);}catch(error){await notify('調査結果の保存先が既存ファイルまたはシンボリックリンクと競合しています。PRは作成していません。');throw error;}
   try{
-    await createLinkedProposal(gh,{kind:'report',issue:n,runId:env.GITHUB_RUN_ID,sha:target.sha,id:target.fingerprint,base:repo.default_branch,title:`docs: investigation report for issue #${n}`,body:`${marker(n)}\nRefs #${n}\n\n調査結果を \`${file.path}\` にまとめました。コード修正のPRではありません。\n\n確認: Markdownの整形・容量・保存先・元SHA・Issue内容を検査済み。コードのテストは行っていません。人間による根拠の照合とレビューが必要です。${footer}`,files:[file],notify:async pr=>notify(`調査結果を ${proposalLink(gh,pr.number)} にまとめました。\n\n保存先: \`${file.path}\`\n\nコードの修正はしていません。Markdownの差分と調査内容をレビューしてください。`)});
+    await createLinkedProposal(gh,{kind:'report',issue:n,runId:env.GITHUB_RUN_ID,sha:target.sha,id:target.fingerprint,base:repo.default_branch,title:`docs: investigation report for issue #${n}`,body:`${marker(n)}\n${revisionMarker(target)}\n${referenceMarker(bundle.cfg.referencePreviousPRs??true)}\nRefs #${n}\n\n調査結果を \`${file.path}\` にまとめました。コード修正のPRではありません。\n\n旧PRの参照: ${(bundle.cfg.referencePreviousPRs??true)?'あり':'なし'}\n\n確認: Markdownの整形・容量・保存先・元SHA・Issue内容を検査済み。コードのテストは行っていません。人間による根拠の照合とレビューが必要です。${previousLinks(gh,bundle.context.previousProposals)}${footer}`,files:[file],notify:async pr=>notify(`調査結果を ${proposalLink(gh,pr.number)} にまとめました。\n\n保存先: \`${file.path}\`\n\nコードの修正はしていません。Markdownの差分と調査内容をレビューしてください。`)});
   }catch(error){
     if(error.code==='NOTIFY'){
       if(env.GITHUB_STEP_SUMMARY)await appendFile(env.GITHUB_STEP_SUMMARY,`${proposalLink(gh,error.proposalNumber)} は作成済みです。${messages.NOTIFY}\n`);

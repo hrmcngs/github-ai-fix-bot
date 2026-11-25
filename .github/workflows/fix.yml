@@ -6,6 +6,11 @@ on:
     types: [labeled]
   workflow_dispatch:
     inputs:
+      reference_previous:
+        description: 旧PRの差分を参照するか（defaultは設定に従う）
+        type: choice
+        options: [default, 'on', 'off']
+        default: default
       number:
         description: 修正するIssue番号（APIキーを入力しない）
         required: true

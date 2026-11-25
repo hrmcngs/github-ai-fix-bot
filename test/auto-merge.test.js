@@ -2,15 +2,18 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile,access} from 'node:fs/promises';
 import {mergeConfig,botProposal,protectedPolicy,considerMerge,enableNativeMerge,protection} from '../.github/ai-bot/src/auto-merge.js';
+import {revisionMarker} from '../.github/ai-bot/src/proposal-state.js';
+const issue={number:1,state:'open',title:'Fix',body:'Fix addition'};
 const cfg=JSON.parse(await readFile(new URL('../.github/ai-bot/config.json',import.meta.url)));
 const sha='a'.repeat(40),base='b'.repeat(40);
-function pr(){return{number:2,state:'open',draft:false,merged:false,mergeable:true,mergeable_state:'clean',user:{type:'Bot',login:'github-actions[bot]'},body:'<!-- ai-fix:issue:1 -->\nCloses #1',labels:[{name:'ai-auto-merge'}],head:{ref:'ai-fix/issue-1-0123456789ab-123',sha,repo:{full_name:'a/b'}},base:{ref:'main',sha:base,repo:{full_name:'a/b'}}};}
+function pr(){return{number:2,state:'open',draft:false,merged:false,mergeable:true,mergeable_state:'clean',user:{type:'Bot',login:'github-actions[bot]'},body:`<!-- ai-fix:issue:1 -->\n${revisionMarker(issue)}\nCloses #1`,labels:[{name:'ai-auto-merge'}],head:{ref:'ai-fix/issue-1-0123456789ab-123',sha,repo:{full_name:'a/b'}},base:{ref:'main',sha:base,repo:{full_name:'a/b'}}};}
 function state(){return{head:sha,decision:'APPROVED',rule:{requiresApprovingReviews:true,requiredApprovingReviewCount:1,dismissesStaleReviews:true,requiresStatusChecks:true,requiresStrictStatusChecks:true,isAdminEnforced:true,requiredStatusCheckContexts:cfg.autoMerge.requiredChecks}};}
 function fixture({pull=pr(),fresh=pull,repo={},reviews,files,check,run={}}={}){
   const calls=[];let reads=0;
   const gh={repo:'a/b',token:'dummy-github-token',path:(tail='')=>`/repos/a/b${tail}`,calls,request:async(path)=>{
     calls.push(path);
     if(path==='/repos/a/b')return{default_branch:'main',allow_auto_merge:true,allow_squash_merge:true,...repo};
+    if(path==='/repos/a/b/issues/1')return issue;
     if(path==='/repos/a/b/pulls/2')return++reads===1?pull:fresh;
     if(path.includes('/permission'))return{permission:'write'};
     if(path.includes('/check-runs?'))return{check_runs:cfg.autoMerge.requiredChecks.map((name,i)=>({id:i+1,name,head_sha:sha,app:{slug:'github-actions'},status:'completed',conclusion:'success',details_url:`https://github.com/a/b/actions/runs/100/job/${i+1}`,...check}))};
@@ -59,7 +62,7 @@ test('protected code and renamed or removed files block auto-merge',async()=>{
   }
 });
 test('report PRs are limited to their generated report path',async()=>{
-  const p=pr();p.body='<!-- ai-report:issue:1 -->';p.head.ref='ai-report/issue-1-0123456789ab-123';
+  const p=pr();p.body=`<!-- ai-report:issue:1 -->\n${revisionMarker(issue)}`;p.head.ref='ai-report/issue-1-0123456789ab-123';
   const good=fixture({pull:p,files:[{filename:'reports/ai/issue-1.md',status:'added'}]});assert.equal((await considerMerge(good.gh,2,cfg,good.deps)).merged,true);
   const bad=fixture({pull:p,files:[{filename:'reports/ai/issue-2.md',status:'added'}]});assert.equal((await considerMerge(bad.gh,2,cfg,bad.deps)).merged,false);
 });
@@ -78,4 +81,16 @@ test('protection query stays scoped to its repository and never prints remote er
   const {gh}=fixture();
   gh.fetcher=async(url,options)=>{assert.equal(url,'https://api.github.com/graphql');assert.equal(options.redirect,'error');assert.deepEqual(JSON.parse(options.body).variables,{owner:'a',name:'b',n:2});return new Response(JSON.stringify({errors:[{message:'remote-sensitive-text'}]}));};
   await assert.rejects(protection(gh,2),e=>e.code==='ACCESS'&&!e.message.includes('remote-sensitive-text'));
+});
+test('old Issue revisions and legacy proposals cannot enable auto-merge',async()=>{
+  for(const body of ['<!-- ai-fix:issue:1 -->\nCloses #1',`<!-- ai-fix:issue:1 -->\n${revisionMarker({...issue,body:'old'})}`]){
+    const {gh,enabled,deps}=fixture({pull:{...pr(),body}});
+    assert.equal((await considerMerge(gh,2,cfg,deps)).merged,false);
+    assert.equal(enabled.length,0);
+  }
+});
+test('Issue changes while checking CI block auto-merge',async()=>{
+  const {gh,enabled,deps}=fixture();const request=gh.request;let reads=0;
+  gh.request=async path=>path.endsWith('/issues/1')&&++reads>1?{...issue,body:'new request'}:request(path);
+  assert.equal((await considerMerge(gh,2,cfg,deps)).merged,false);assert.equal(enabled.length,0);
 });

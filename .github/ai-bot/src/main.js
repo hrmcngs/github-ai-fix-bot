@@ -3,8 +3,9 @@ import { pathToFileURL } from 'node:url';
 import { config, number, allowedPath, scrub, fingerprint, prompt, cleanOutput, comment, SafeError, messages } from './core.js';
 import { GitHub, comments, reportIssue, completed, botOwned, REPORT_MARKER } from './github.js';
 import { tokyo, agent } from './providers.js';
-import { isCommand, requireCommand } from './commands.js';
+import { isCommand, requireCommand, referenceChoice } from './commands.js';
 import { openReport, publishReport } from './report-pr.js';
+import {issueRevision,previousProposals} from './proposal-state.js';
 
 async function json(path, max = 1000000) {
   if ((await stat(path)).size > max) throw new SafeError('CONFIG');
@@ -13,7 +14,7 @@ async function json(path, max = 1000000) {
 async function save(path, value) { await mkdir('.work', { recursive: true }); await writeFile(path, JSON.stringify(value), { mode: 0o600 }); }
 export function issueTarget(issue) {
   if (issue.pull_request || issue.state !== 'open') throw new SafeError('ACCESS');
-  return { kind: 'issue', number: number(issue.number), title: String(issue.title).slice(0,1000), body: scrub(String(issue.body || '')).slice(0,18000) };
+  return { kind: 'issue', number: number(issue.number), revision: issueRevision(issue), title: String(issue.title).slice(0,1000), body: scrub(String(issue.body || '')).slice(0,18000) };
 }
 function alertTarget(alert) {
   if (alert.state !== 'open') throw new SafeError('ACCESS');
@@ -48,6 +49,7 @@ export async function prepare(env = process.env, ghArg) {
   const gh = ghArg || new GitHub(env.GITHUB_REPOSITORY, env.GH_TOKEN);
   const cfg = config(await json('.github/ai-bot/config.json'));
   const event = await json(env.GITHUB_EVENT_PATH,2000000);
+  cfg.referencePreviousPRs=referenceChoice(event,env,cfg);
   const reportPR = isCommand(event,env,'/ai-report-pr') || (env.GITHUB_EVENT_NAME === 'workflow_dispatch' && event.inputs?.result === 'report-pr');
   if (env.GITHUB_EVENT_NAME === 'issue_comment' && !isCommand(event,env,'/ai-investigate') && !reportPR) return;
   const repo = await gh.request(gh.path());
@@ -93,8 +95,9 @@ export async function prepare(env = process.env, ghArg) {
     if (pending.length >= cfg.maxTargetsPerRun) break;
   }
   if (!pending.length) return;
-  const existingReportPR = reportPR ? (await openReport(gh,pending[0].number))?.number : undefined;
+  const existingReportPR = reportPR ? (await openReport(gh,pending[0],cfg.referencePreviousPRs))?.number : undefined;
   const context = existingReportPR ? {files:[],omittedFiles:0} : await collectFiles(gh,sha,cfg,pending);
+  if(reportPR&&!existingReportPR)context.previousProposals=await previousProposals(gh,'report',pending[0],cfg);
   await save('.work/bundle.json',{ version: 1, repo: gh.repo, cfg, targets: pending, context, reportPR, existingReportPR });
   if (env.GITHUB_OUTPUT) await appendFile(env.GITHUB_OUTPUT,`ready=true\nprovider=${cfg.provider}\nreport-pr=${reportPR?'true':'false'}\nreuse-report=${existingReportPR?'true':'false'}\n`);
 }

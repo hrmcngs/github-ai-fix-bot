@@ -1,5 +1,6 @@
 {
   "mode": "manual",
+  "referencePreviousPRs": true,
   "provider": "tokyo",
   "models": {
     "claude": "sonnet",
