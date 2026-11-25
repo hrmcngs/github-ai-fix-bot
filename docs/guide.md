@@ -14,7 +14,7 @@ GitHub上でIssueやDependabotアラートを調査し、日本語の修正方�
 
 ルートのpackage.jsonのスクリプト名だけを読み、checkがあれば `npm run check`、testがあれば `npm test` を検証コマンドにします。スクリプトは設定時には実行しません。testがない・既定の「no test specified」の場合はコード修正を無効にします。検証内容の十分さは人間が確認してください。代表的なソースディレクトリを追加し、Bot自身の修正許可と自動マージは無効にします。カスタム検証やmonorepoは差分を確認して手動で調整してください。
 
-Bot更新用のPATの発行だけはGitHub画面で行います。表示されたリンクから導入先限定・Contents / Pull requests / Workflowsの書込み権限で発行し、非表示の入力欄に貼り付けます。空欄なら登録を省略します。Botファイルのコミット・push・マージは自動実行しません。
+本体更新にPATは不要です。任意の全体更新用PATの発行はGitHub画面で行います。表示されたリンクから導入先限定・Contents / Pull requests / Workflowsの書込み権限で発行し、非表示の入力欄に貼り付けます。空欄なら登録を省略します。Botファイルのコミット・push・マージは自動実行しません。
 
 ## 導入
 
@@ -352,24 +352,21 @@ write以上の利用者がIssueのタイトル・本文を編集すると、`Ret
 
 ## Bot自体の更新PR
 
-Bot自体の更新はIssueを作らず、PRだけで完結します。新版のインストーラーは `.github/ai-bot/installation.json` に配布元コミットとBotファイルのハッシュを記録します。導入先のデフォルトブランチへ取り込むと、**Bot update notices** が毎日配布元mainを確認し、新しい版の更新PRを自動作成します。コメントは不要です。差分とCIをレビューしてマージすると、Bot専用ファイルと導入記録が更新され、以後のActionsは更新後のBotを使います。
+追加トークン不要の **runtime（本体のみ）** を既定とします。**Bot update notices** が毎日確認し、更新があれば専用ブランチからPRを作成します。最初の **AI investigation → Run workflow** の「Bot本体の更新PRも確認する」（既定ON）からも確認できます。このチェックを外すとその回の確認だけを省略し、毎日の確認は継続します。調査と更新は別ジョブなので、AIのAPIキーが未登録でも更新の確認は可能です。リポジトリのActionsによるPR作成許可が必要です。
 
-既に同じ版のPRが開いていれば再利用します。見送る場合はPRを閉じてください。同じ版は自動で作り直しません。更新がない場合は何も作成しません。確認結果・競合・トークン不足はActionsのSummaryとログへ表示します。即時配信ではなく毎日の確認です。**Run workflow** でも確認できます。配布元リポジトリ自体は対象外です。
+runtimeでは `GITHUB_TOKEN` の contents/write・pull-requests/write をPR作成ジョブにだけ与えます。AIキーや追加PATを使用しません。`config.json`、アプリのソース、`.github/workflows/` は変更しません。既存ファイルのハッシュを照合し、独自変更や競合があれば停止します。上流コードは実行せず、人間のレビュー後にマージします。
 
-初回にfine-grained PATをActions Secret **`AI_BOT_UPDATE_TOKEN`** として登録します。必要なrepository permissionsは **Contents: Read and write、Pull requests: Read and write、Workflows: Read and write** です。キーはIssue・コメント・通常の入力欄へ貼らないでください。[GitHubのワークフロー更新権限](https://docs.github.com/en/rest/repos/contents#create-or-update-file-contents)
+Actions定義に差分がある場合は、手動更新が必要なファイルをPRに記載します。Actions定義に依存する新機能は手動更新まで利用できない場合があります。`install.sh --upgrade` でバックアップを作成して更新し、差分をPRで確認してください。導入記録ではスキップしたActions定義の元のハッシュを保持します。記録のコミットSHAは本体の配布元を表し、全ファイルが同時に更新された意味ではありません。Actions定義だけの変更では本体更新PRを繰り返し作成しません。
 
-### 初回の設定
+同じ版・同じ更新範囲のPRは再利用します。見送って閉じた版は自動で作り直しません。更新がない場合はActionsのSummaryに表示します。GitHubの定期実行は遅延する場合があります。
 
-1. 新版のインストーラー（旧版からの移行は `--upgrade`）でBotを導入し、ワークフローと導入記録をPRでデフォルトブランチに取り込みます。
-2. GitHubの個人設定 → **Developer settings → Personal access tokens → Fine-grained tokens → Generate new token** を開きます。
-3. 名前と期限を設定し、**Resource owner** は導入先の所有者、**Repository access → Only select repositories** は導入先だけを指定します。
-4. **Contents / Pull requests / Workflows** をそれぞれ **Read and write** にします。組織の承認が必要と表示された場合は所有者/管理者の承認後に使えます。
-5. 導入先の **Settings → Secrets and variables → Actions → New repository secret** に、名前 `AI_BOT_UPDATE_TOKEN`、値は発行したトークンで登録します。東京都AI等のAPIキーとは別物です。
-6. **Actions → Bot update notices → Run workflow** で確認します。更新があればPRが届きます。以後は毎日の自動確認に任せられます。期限切れなら同じSecretの値を差し替えて再実行してください。
+`GITHUB_TOKEN` で作成したPRでは通常のpush/PRワークフローが自動起動しない制約があります。マージ前に差分をレビューし、必要な手動CIを実行してください。[GitHub公式：GITHUB_TOKEN](https://docs.github.com/en/actions/concepts/security/github_token)
 
-更新トークンは、新しい版が見つかった後のPR作成ジョブだけに渡します。固定した配布元、確認済みコミット、デフォルトブランチを再確認し、Git blobハッシュと導入済みファイルを照合します。`config.json`、AIキー、対象プロジェクトのソースは更新対象外です。独自変更、未管理の既存ファイル、シンボリックリンクがあれば停止します。取得した上流コードは更新処理中に実行せず、更新PRは自動マージしません。
+### 全体更新を手動で起動する場合
 
-旧版の通知Issueからの `/ai-update` は互換性のため残していますが、新しい自動更新にIssueやコメントは不要です。
+Actions定義も含めた更新を自動でPRにする場合だけ、導入先限定のfine-grained PATに **Contents / Pull requests / Workflows: Read and write** を付け、Actions Secret `AI_BOT_UPDATE_TOKEN` に登録します。通常のActions入力欄やコメントにトークンを貼らないでください。
+
+**Bot update notices → Run workflow → scope=full** を選びます。毎日の確認とAI investigationからの確認は本体のみです。全体更新でも設定・AIキーは保持し、自動マージしません。[GitHub公式：ワークフロー更新権限](https://docs.github.com/en/rest/repos/contents#create-or-update-file-contents)
 
 ### 処理の隔離・公開直前の再確認
 
