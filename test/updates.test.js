@@ -196,6 +196,7 @@ test('runtime scope neither adopts nor overwrites locally changed workflows',asy
 test('workflow-only upstream changes do not repeatedly create runtime PRs',async()=>{
   const f=fixture(),latestRelease=await release(f.source);
   const state={...f.state,files:{...latestRelease.files,'.github/workflows/fix.yml':f.state.files['.github/workflows/fix.yml']}};
+  for(const entry of f.tree)if(state.files[entry.path])entry.sha=state.files[entry.path];
   assert.equal(await checkUpdate(f.gh,state,f.source,'runtime'),undefined);
   await applyUpdate(f.gh,null,{repository:{full_name:'a/b'}},{...automatic(f),AI_BOT_UPDATE_SCOPE:'runtime'},state,f.source);
   assert.ok(!f.gh.calls.some(c=>c.method==='POST'&&c.p.endsWith('/pulls')));
