@@ -4,7 +4,7 @@ import {createHash} from 'node:crypto';
 import {readFile,mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {SOURCE,STATE,MANIFEST,UPDATE_MARKER,manifest,installation,Upstream,release,checkUpdate,authorizeUpdate,updateFiles,applyUpdate,loadInstallation} from '../.github/ai-bot/src/updates.js';
+import {SOURCE,STATE,MANIFEST,UPDATE_MARKER,manifest,installation,Upstream,release,checkUpdate,authorizeUpdate,updateFiles,applyUpdate,loadInstallation,authorizeAutomaticUpdate,updateStatus} from '../.github/ai-bot/src/updates.js';
 const old='a'.repeat(40),latest='b'.repeat(40),base='c'.repeat(40);
 const file='.github/ai-bot/src/main.js';
 const gitHash=content=>createHash('sha1').update(`blob ${Buffer.byteLength(content)}\0`).update(content).digest('hex');
@@ -24,7 +24,7 @@ function fixture({issues=[],role='write',closed=false,changedNotice=false,modifi
   tree.push({path:STATE,type:'blob',mode:'100644',sha:gitHash(JSON.stringify(state))});
   const calls=[];const gh={repo:'a/b',calls,path:(p='')=>`/repos/a/b${p}`,list:async p=>p.includes('/pulls?')?[]:issues,request:async(p,method='GET',body)=>{
     calls.push({p,method,body});
-    if(method!=='GET'){if(p.endsWith('/pulls'))return{number:15};return{sha:base};}
+    if(method!=='GET'){if(p.endsWith('/pulls'))return{number:15};if(p.endsWith('/issues'))return{number:9};return{sha:base};}
     if(p==='/repos/a/b')return{default_branch:'main'};
     if(p.includes('/permission'))return{permission:role};
     if(p.endsWith('/issues/comments/123'))return{body:'/ai-update',user:event.comment.user,issue_url:'https://api.github.com/repos/a/b/issues/9'};
@@ -45,7 +45,7 @@ test('distribution manifest agrees with installer and rejects arbitrary paths',a
 });
 test('update checks ask in an Issue once per version and respect dismissal',async()=>{
   let f=fixture();await checkUpdate(f.gh,f.state,f.source);
-  const create=f.gh.calls.find(c=>c.method==='POST');assert.equal(create.p,'/repos/a/b/issues');assert.ok(create.body.body.includes('/ai-update'));assert.ok(create.body.title.includes('アップデートしますか'));
+  const create=f.gh.calls.find(c=>c.method==='POST');assert.equal(create.p,'/repos/a/b/issues');assert.ok(create.body.body.includes('/ai-update'));assert.ok(create.body.title.includes('更新'));
   f=fixture({issues:[{...f.notice,state:'closed'}]});await checkUpdate(f.gh,f.state,f.source);assert.equal(f.gh.calls.length,0);
   f=fixture();const same=await release(f.source);await checkUpdate(f.gh,{...f.state,files:same.files},f.source);assert.equal(f.gh.calls.length,0);
 });
@@ -124,4 +124,50 @@ test('missing or malformed installation records reply safely to an authorized up
     const f=fixture();await writeFile(STATE,JSON.stringify(f.state));
     assert.deepEqual(await loadInstallation(f.gh,f.event,f.env,'apply'),f.state);
   }finally{process.chdir(original);await rm(dir,{recursive:true,force:true});}
+});
+
+function automatic(f,trigger='schedule'){
+  return{...f.env,GITHUB_EVENT_NAME:trigger,AI_BOT_UPDATE_AUTOMATIC:'true',AI_BOT_UPDATE_ISSUE:'9',AI_BOT_UPDATE_COMMIT:latest};
+}
+test('scheduled detection returns a pinned target for new and existing open notices, never dismissed notices',async()=>{
+  let f=fixture();assert.deepEqual(await checkUpdate(f.gh,f.state,f.source),{number:9,commit:latest});
+  f=fixture({issues:[f.notice]});assert.deepEqual(await checkUpdate(f.gh,f.state,f.source),{number:9,commit:latest});
+  assert.equal(f.gh.calls.length,0);
+  f=fixture({issues:[{...f.notice,state:'closed'}]});assert.equal(await checkUpdate(f.gh,f.state,f.source),undefined);
+});
+test('automatic update authorization binds trusted triggers, repository, branch and checked notice SHA',async()=>{
+  let f=fixture();const event={repository:{full_name:'a/b'}};
+  assert.equal((await authorizeAutomaticUpdate(f.gh,event,automatic(f))).commit,latest);
+  for(const overrides of [{GITHUB_EVENT_NAME:'issue_comment'},{GITHUB_REF:'refs/heads/feature'},{AI_BOT_UPDATE_AUTOMATIC:'false'},{AI_BOT_UPDATE_COMMIT:old}]){
+    f=fixture();await assert.rejects(authorizeAutomaticUpdate(f.gh,event,{...automatic(f),...overrides}));
+    assert.ok(!f.gh.calls.some(c=>c.method!=='GET'));
+  }
+  f=fixture({closed:true});await assert.rejects(authorizeAutomaticUpdate(f.gh,event,automatic(f)));
+  f=fixture({role:'read'});await assert.rejects(authorizeAutomaticUpdate(f.gh,event,automatic(f,'workflow_dispatch')));
+});
+test('a scheduled update creates the PR and Issue link without any user comment',async()=>{
+  const f=fixture();await applyUpdate(f.gh,f.gh,{repository:{full_name:'a/b'}},automatic(f),f.state,f.source);
+  assert.ok(f.gh.calls.some(c=>c.method==='POST'&&c.p.endsWith('/pulls')));
+  assert.ok(f.gh.calls.some(c=>c.p.endsWith('/issues/9/comments')&&c.body?.body.includes('/pull/15')));
+  assert.ok(!f.gh.calls.some(c=>c.p.endsWith('/issues/comments/123')));
+  assert.ok(!f.gh.calls.some(c=>c.p.endsWith('/merge')));
+});
+test('automatic retries reuse open PRs and respect closed PRs without needing writer credentials',async()=>{
+  for(const state of ['open','closed']){
+    const f=fixture(),list=f.gh.list;
+    f.gh.list=async path=>path.includes('/pulls?')?[{number:15,state,body:`<!-- ai-bot-update-pr:${latest} -->\nRefs #9`,head:{ref:'ai-update/issue-9-0123456789ab-123',repo:{full_name:'a/b'}},base:{ref:'main',repo:{full_name:'a/b'}}}]:list(path);
+    await applyUpdate(f.gh,null,{repository:{full_name:'a/b'}},automatic(f),f.state,f.source);
+    assert.ok(!f.gh.calls.some(c=>c.p.includes('/git/')));
+    assert.ok(!f.gh.calls.some(c=>c.method==='POST'&&c.p.endsWith('/pulls')));
+    assert.ok(f.gh.calls.some(c=>c.body?.body?.includes(state==='open'?'/pull/15':'閉じられています')));
+  }
+});
+test('repeated automatic status reports do not post duplicate comments',async()=>{
+  const f=fixture();await updateStatus(f.gh,9,latest,'setup needed');
+  const first=f.gh.calls.find(c=>c.method==='POST').body.body;
+  f.gh.calls.length=0;
+  f.gh.list=async()=>[{id:42,user:{type:'Bot',login:'github-actions[bot]'},body:first}];
+  await updateStatus(f.gh,9,latest,'setup needed');assert.equal(f.gh.calls.length,0);
+  await updateStatus(f.gh,9,latest,'PR created');assert.equal(f.gh.calls.length,1);
+  assert.equal(f.gh.calls[0].method,'PATCH');assert.equal(f.gh.calls[0].p,'/repos/a/b/issues/comments/42');
 });

@@ -77,11 +77,14 @@ export async function checkUpdate(gh,state,source=new Upstream()){
   const latest=await release(source);
   if(JSON.stringify(Object.entries(state.files).sort())===JSON.stringify(Object.entries(latest.files).sort()))return;
   const issues=(await gh.list(gh.path('/issues?state=all&sort=created&direction=desc'))).filter(issue=>!issue.pull_request&&botOwned(issue)&&issue.body?.startsWith(UPDATE_MARKER+'\n'));
-  if(issues.some(issue=>issue.body.split('\n')[1]===targetMarker(latest.commit)))return;
-  const body=`${UPDATE_MARKER}\n${targetMarker(latest.commit)}\n## Botをアップデートしますか？\n\n新しいBotの更新があります。\n\n[変更内容を確認](https://github.com/${SOURCE}/compare/${state.commit}...${latest.commit})\n\n- 更新する: write以上の利用者がこのIssueに \`/ai-update\` とコメントしてください。更新PRを作成します。\n- 見送る: このIssueを閉じてください。同じ版は再通知しません。\n\n設定ファイル・APIキーは保持します。ローカルで変更されたBotファイルは上書きせず停止します。更新PRの差分・CIを確認してから人間がマージしてください。\n\n更新PRにはSecret \`AI_BOT_UPDATE_TOKEN\` が必要です。導入先だけのContents・Pull requests・Workflowsのwrite権限を持つトークンをActions Secretsに登録してください。Issueやコメントには貼らないでください。`;
+  const existing=issues.find(issue=>issue.body.split('\n')[1]===targetMarker(latest.commit));
+  if(existing)return existing.state==='open'?{number:number(existing.number),commit:latest.commit}:undefined;
+  const body=`${UPDATE_MARKER}\n${targetMarker(latest.commit)}\n## Bot更新のお知らせ\n\n新しいBotの更新があります。更新PRを自動で作成します。コメントは不要です。\n\n[変更内容を確認](https://github.com/${SOURCE}/compare/${state.commit}...${latest.commit})\n\n- 更新する: 自動で届く更新PRをレビューしてマージしてください。\n- 手動で再試行する: write以上の利用者は \`/ai-update\` でも実行できます。\n- 見送る: このIssueを閉じてください。同じ版は再通知しません。\n\n設定ファイル・APIキーは保持します。ローカルで変更されたBotファイルは上書きせず停止します。更新PRの差分・CIを確認してから人間がマージしてください。\n\n更新PRにはSecret \`AI_BOT_UPDATE_TOKEN\` が必要です。導入先だけのContents・Pull requests・Workflowsのwrite権限を持つトークンをActions Secretsに登録してください。Issueやコメントには貼らないでください。`;
   const open=issues.find(issue=>issue.state==='open');
-  if(open)await gh.request(gh.path(`/issues/${number(open.number)}`),'PATCH',{title:'Botをアップデートしますか？',body});
-  else await gh.request(gh.path('/issues'),'POST',{title:'Botをアップデートしますか？',body});
+  let issue;
+  if(open){await gh.request(gh.path(`/issues/${number(open.number)}`),'PATCH',{title:'Bot更新のお知らせ',body});issue=open;}
+  else issue=await gh.request(gh.path('/issues'),'POST',{title:'Bot更新のお知らせ',body});
+  return{number:number(issue.number),commit:latest.commit};
 }
 export async function authorizeUpdate(gh,event,env){
   if(!isCommand(event,env,'/ai-update'))return;
@@ -93,6 +96,29 @@ export async function authorizeUpdate(gh,event,env){
   const approved=updateTarget(event.issue),current=updateTarget(await gh.request(gh.path(`/issues/${n}`)));
   if(approved!==current)throw new SafeError('STALE');
   return{number:n,commit:current,branch:repo.default_branch};
+}
+// Automatic proposals are authorized by the trusted scheduled/check job, not Issue text.
+export async function authorizeAutomaticUpdate(gh,event,env){
+  if(env.AI_BOT_UPDATE_AUTOMATIC!=='true'||!['schedule','workflow_dispatch'].includes(env.GITHUB_EVENT_NAME))throw new SafeError('ACCESS');
+  const repo=await gh.request(gh.path());
+  if(event.repository?.full_name!==gh.repo||env.GITHUB_REF!==`refs/heads/${repo.default_branch}`)throw new SafeError('ACCESS');
+  if(env.GITHUB_EVENT_NAME==='workflow_dispatch'){
+    const role=await gh.request(gh.path(`/collaborators/${encodeURIComponent(env.GITHUB_ACTOR)}/permission`));
+    if(!['admin','maintain','write'].includes(role.permission))throw new SafeError('ACCESS');
+  }
+  const n=number(env.AI_BOT_UPDATE_ISSUE),commit=env.AI_BOT_UPDATE_COMMIT;
+  if(!sha(commit))throw new SafeError('ACCESS');
+  if(updateTarget(await gh.request(gh.path(`/issues/${n}`)))!==commit)throw new SafeError('STALE');
+  return{number:n,commit,branch:repo.default_branch};
+}
+const authorizeRequest=(gh,event,env)=>env.AI_BOT_UPDATE_AUTOMATIC==='true'?authorizeAutomaticUpdate(gh,event,env):authorizeUpdate(gh,event,env);
+export async function updateStatus(gh,n,commit,text){
+  if(!sha(commit))throw new SafeError('ACCESS');
+  const marker=`<!-- ai-bot-update-status:${commit} -->`,body=marker+'\n'+text;
+  const rows=await gh.list(gh.path(`/issues/${number(n)}/comments`));
+  const current=rows.find(row=>botOwned(row)&&row.body?.startsWith(marker+'\n'));
+  if(current){if(current.body!==body)await gh.request(gh.path(`/issues/comments/${number(current.id)}`),'PATCH',{body});}
+  else await gh.request(gh.path(`/issues/${number(n)}/comments`),'POST',{body});
 }
 export async function updateFiles(gh,state,latest,source,baseSha){
   const tree=treeMap(await gh.request(gh.path(`/git/trees/${baseSha}?recursive=1`)));
@@ -118,25 +144,27 @@ export async function updateFiles(gh,state,latest,source,baseSha){
 }
 export async function applyUpdate(gh,writer,event,env,state,source=new Upstream()){
   installation(state);
-  const auth=await authorizeUpdate(gh,event,env);if(!auth)throw new SafeError('ACCESS');
-  const notify=body=>gh.request(gh.path(`/issues/${auth.number}/comments`),'POST',{body});
-  if(!writer){await notify('更新PRにはActions Secret `AI_BOT_UPDATE_TOKEN` が必要です。導入先だけのContents・Pull requests・Workflowsのwrite権限を設定し、新しい `/ai-update` コメントで再実行してください。キーはコメントに貼らないでください。');throw new SafeError('UPDATE_TOKEN');}
+  const auth=await authorizeRequest(gh,event,env);if(!auth)throw new SafeError('ACCESS');
+  const notify=body=>updateStatus(gh,auth.number,auth.commit,body);
   const marker=`<!-- ai-bot-update-pr:${auth.commit} -->`;
-  const existing=(await gh.list(gh.path('/pulls?state=open'))).find(pr=>pr.body?.startsWith(marker+'\n')&&pr.head?.repo?.full_name===gh.repo&&pr.base?.repo?.full_name===gh.repo&&pr.base.ref===auth.branch&&pr.head.ref?.startsWith(`ai-update/issue-${auth.number}-`));
-  if(existing){await notify(`更新PRは ${proposalLink(gh,existing.number)} です。レビューしてからマージしてください。`);return;}
+  const proposals=(await gh.list(gh.path('/pulls?state=all'))).filter(pr=>pr.body?.startsWith(marker+'\n')&&pr.head?.repo?.full_name===gh.repo&&pr.base?.repo?.full_name===gh.repo&&pr.base.ref===auth.branch&&pr.head.ref?.startsWith(`ai-update/issue-${auth.number}-`));
+  const existing=proposals.find(pr=>pr.state==='open');
+  if(existing){await notify(`更新PRは ${proposalLink(gh,existing.number)} です。レビューしてマージするとBotが更新されます。`);return;}
+  if(env.AI_BOT_UPDATE_AUTOMATIC==='true'&&proposals.some(pr=>pr.state==='closed')){await notify('この版の更新PRは既に閉じられています。同じ版のPRは自動で作り直しません。必要なら `/ai-update` で再試行できます。');return;}
+  if(!writer){await notify('自動更新PRにはActions Secret `AI_BOT_UPDATE_TOKEN` が必要です。導入先だけのContents・Pull requests・Workflowsのwrite権限を設定してください。登録後は次の定期実行、またはBot update noticesのRun workflowでPRを作成します。キーはコメントに貼らないでください。');throw new SafeError('UPDATE_TOKEN');}
   const latest=await release(source,auth.commit);
   const ref=await gh.request(gh.path(`/git/ref/heads/${encodeURIComponent(auth.branch)}`));
   const base=ref.object?.sha;if(!sha(base))throw new SafeError('ACCESS');
   if(env.GITHUB_SHA&&env.GITHUB_SHA!==base)throw new SafeError('STALE');
   const files=await updateFiles(gh,state,latest,source,base);
-  const fresh=await authorizeUpdate(gh,event,env);
+  const fresh=await authorizeRequest(gh,event,env);
   const freshRef=await gh.request(gh.path(`/git/ref/heads/${encodeURIComponent(auth.branch)}`));
   if(fresh.commit!==auth.commit||freshRef.object?.sha!==base)throw new SafeError('STALE');
   const id=createHash('sha256').update(auth.commit).digest('hex');
   await createLinkedProposal(writer,{kind:'update',issue:auth.number,runId:env.GITHUB_RUN_ID,sha:base,id,base:auth.branch,title:'chore: update GitHub AI Bot',body:`${marker}\nRefs #${auth.number}\n\n[配布元の変更](https://github.com/${SOURCE}/compare/${state.commit}...${auth.commit})\n\nAI使用: なし（配布元ファイルの更新）。\n\nBot専用ファイルを更新します。設定とAPIキーは保持します。取得ファイルのGit blobハッシュと導入済みファイルの一致を検査しました。上流コード・コマンド・インストーラーは実行していません。更新PRの差分とCIを人間がレビューしてください。自動マージは行いません。`,files,notify:pr=>notify(`更新PRを ${proposalLink(gh,pr.number)} に作成しました。差分とCIを確認してからマージしてください。`)});
 }
 export async function loadInstallation(gh,event,env,action){
-  const auth=action==='apply'?await authorizeUpdate(gh,event,env):null;
+  const auth=action==='apply'?await authorizeRequest(gh,event,env):null;
   if(action==='apply'&&!auth)throw new SafeError('ACCESS');
   try{return installation(JSON.parse(await readFile(STATE,'utf8')));}catch{
     const text='導入記録がないか破損しています。新しいインストーラーで導入・移行し、差分を確認してから再実行してください。自動上書きはしていません。';
@@ -161,12 +189,13 @@ export async function updates(env=process.env){
   const state=await loadInstallation(gh,event,env,action);if(!state)return;
   if(action==='check'){
     if(!['schedule','workflow_dispatch'].includes(env.GITHUB_EVENT_NAME))throw new SafeError('ACCESS');
-    await checkUpdate(gh,state);
+    const update=await checkUpdate(gh,state);
+    if(update&&env.GITHUB_OUTPUT)await appendFile(env.GITHUB_OUTPUT,`ready=true\nissue=${update.number}\ncommit=${update.commit}\n`);
   }else if(action==='apply'){
     const writer=env.AI_BOT_UPDATE_TOKEN?new GitHub(gh.repo,env.AI_BOT_UPDATE_TOKEN):null;
     try{await applyUpdate(gh,writer,event,env,state);}catch(error){
       if(error.code==='NOTIFY')throw error;
-      if(error.code!=='UPDATE_TOKEN')await gh.request(gh.path(`/issues/${number(event.issue?.number)}/comments`),'POST',{body:error.code==='STALE'?'確認中にIssueまたはデフォルトブランチが更新されました。変更内容を確認して、新しい `/ai-update` コメントで再実行してください。':error.code==='UPDATE_CONFLICT'?'Botファイルに独自の変更または保存先の競合があります。上書きせず停止しました。差分を確認して手動で更新してください。':'更新PRを作成できませんでした。トークンの権限と配布元へのアクセスを確認してください。ファイルを直接上書きしていません。'});
+      if(error.code!=='UPDATE_TOKEN')await updateStatus(gh,number(env.AI_BOT_UPDATE_AUTOMATIC==='true'?env.AI_BOT_UPDATE_ISSUE:event.issue?.number),env.AI_BOT_UPDATE_AUTOMATIC==='true'?env.AI_BOT_UPDATE_COMMIT:updateTarget(event.issue),error.code==='STALE'?'確認中にIssueまたはデフォルトブランチが更新されました。変更内容を確認して、次の定期実行、またはRun workflowで再実行してください。':error.code==='UPDATE_CONFLICT'?'Botファイルに独自の変更または保存先の競合があります。上書きせず停止しました。差分を確認して手動で更新してください。':'更新PRを作成できませんでした。トークンの権限と配布元へのアクセスを確認してください。ファイルを直接上書きしていません。');
       throw error;
     }
   }else throw new SafeError('CONFIG');

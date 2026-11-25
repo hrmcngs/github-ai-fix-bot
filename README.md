@@ -322,29 +322,30 @@ write以上の利用者がIssueのタイトル・本文を編集すると、`Ret
 
 ## Botの更新通知と更新PR
 
-新版のインストーラーは `.github/ai-bot/installation.json` に配布元コミットと導入ファイルのハッシュを記録します。これを含むBot用ファイルを導入先のデフォルトブランチに取り込むと、**Bot update notices** が毎日配布元のmainを確認し、Botファイルに変更があれば「Botをアップデートしますか？」というIssueを作ります。**Run workflow** でも確認できます。即時の配信ではなく定期確認です。既存導入先も、このワークフローと導入記録を一度導入する必要があります。記録がない状態では自動上書きしません。配布元リポジトリ自体では通知しません。
+新版のインストーラーは `.github/ai-bot/installation.json` に配布元コミットと導入ファイルのハッシュを記録します。これを含むBot用ファイルを導入先のデフォルトブランチに取り込むと、**Bot update notices** が毎日配布元のmainを確認し、Botファイルに変更があれば更新通知Issueと更新PRを自動で作ります。コメント操作は不要で、PRをレビューしてマージするとBotが更新されます。**Run workflow** でも確認できます。即時の配信ではなく定期確認です。既存導入先も、このワークフローと導入記録を一度導入する必要があります。記録がない状態では自動上書きしません。配布元リポジトリ自体では通知しません。
 
 通知Issueでの操作:
 
-- 更新する: write以上の利用者が `/ai-update` とコメントすると、更新PRを作り、そのリンクを返信します。
-- 見送る: 通知Issueを閉じます。同じコミットの再通知はしません。
+- 更新する: 自動で作られた更新PRをレビューしてマージします。コメントは不要です。通知IssueにもPRリンクが表示されます。
+- 手動で再試行する: write以上の利用者は、従来の `/ai-update` も使えます。
+- 見送る: 通知Issueまたは更新PRを閉じます。同じ版のPRは自動で作り直しません。
 
-通知だけなら追加のSecretは不要です。更新PRではワークフロー自体も変更するため、導入先だけを対象とするfine-grained PATをActions Secret **`AI_BOT_UPDATE_TOKEN`** に登録してください。必要なrepository permissionsは **Contents: Read and write、Pull requests: Read and write、Workflows: Read and write** です。APIキーと同様にIssue・コメント・通常の入力欄へ貼らないでください。[GitHubのワークフロー更新権限](https://docs.github.com/en/rest/repos/contents#create-or-update-file-contents)
+更新PRを自動作成するには初回にSecretの登録が必要です。未登録でも更新通知Issueは作ります。更新PRではワークフロー自体も変更するため、導入先だけを対象とするfine-grained PATをActions Secret **`AI_BOT_UPDATE_TOKEN`** に登録してください。必要なrepository permissionsは **Contents: Read and write、Pull requests: Read and write、Workflows: Read and write** です。APIキーと同様にIssue・コメント・通常の入力欄へ貼らないでください。[GitHubのワークフロー更新権限](https://docs.github.com/en/rest/repos/contents#create-or-update-file-contents)
 
 ### 更新PR用トークンの設定手順
 
-更新通知だけを使う場合、この設定は不要です。まず新版Botのワークフローと `installation.json` を導入先のデフォルトブランチに取り込んでください。未マージの機能は配布元のmainからは取得できません。導入元リポジトリ自体は更新通知の対象外です。
+初回にこの設定をすると、以後はコメントなしで更新PRが届きます。まず新版Botのワークフローと `installation.json` を導入先のデフォルトブランチに取り込んでください。未マージの機能は配布元のmainからは取得できません。導入元リポジトリ自体は更新通知の対象外です。
 
 1. GitHub右上のアカウントメニュー → **Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token** を開きます。
 2. 名前と有効期限を設定し、**Resource owner** をBot導入先リポジトリの所有者にします。
 3. **Repository access → Only select repositories** で、Botを入れたリポジトリだけを選びます。配布元を選ぶ必要はありません。
 4. **Repository permissions** で **Contents / Pull requests / Workflows** をそれぞれ **Read and write** にします。ほかの任意の権限は追加しません。組織の承認が必要と表示された場合は、所有者/管理者の承認後に使えます。
 5. 発行したトークンを、導入先の **Settings → Secrets and variables → Actions → New repository secret** に登録します。**Name** は `AI_BOT_UPDATE_TOKEN`、**Secret** は発行したトークンです。東京都AI等のAPIキーとは別物です。
-6. 導入先の **Actions → Bot update notices → Run workflow** で確認します。更新があればできる通知Issueに `/ai-update` とコメントし、返信された更新PRをレビューしてマージします。変更がなければIssueは作りません。
+6. 導入先の **Actions → Bot update notices → Run workflow** で確認します。更新があれば通知Issueと更新PRを自動作成します。届いたPRをレビューしてマージします。変更がなければIssueやPRは作りません。
 
 期限切れの場合は同じSecretの値を新しいトークンに差し替えます。通知Issueにキーを貼らないでください。[トークン発行の公式手順](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)、[Actions Secretsの公式手順](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets)
 
-更新用トークンは、権限とコマンドを確認した後の更新PR作成ジョブだけに渡します。配布元の取得は固定したpublicリポジトリへの認証なしアクセスです。配布元がprivateの場合は取得に失敗して停止します。
+更新用トークンは、定期/手動確認で新しい更新が見つかった後、または手動コマンドの権限確認後の更新PR作成ジョブだけに渡します。定期実行でも固定した配布元・確認済みのコミット・現在の通知Issue・デフォルトブランチを再確認してからPRにします。配布元の取得は固定したpublicリポジトリへの認証なしアクセスです。配布元がprivateの場合は取得に失敗して停止します。
 
 更新対象はBotの配布マニフェストにある専用ファイルだけです。`config.json`、AIキー、対象プロジェクトのソースや `package.json` は変更しません。上流の各ファイルのGit blobハッシュと導入時の記録を照合し、Botファイルに利用者の独自変更や競合、シンボリックリンクがあれば停止します。上流のスクリプトやコードは更新処理中に実行しません。更新PRの差分とCIを人間がレビューしてからマージしてください。更新PRは自動マージ対象外です。
 
@@ -366,3 +367,6 @@ write以上の利用者がIssueのタイトル・本文を編集すると、`Ret
 - 東京都: `AI: 東京都生成AI API / モデル: 未取得（API応答から取得していません）`。
 
 `sonnet` などの別名から具体的なモデルバージョンを推測しません。表示は `.github/ai-bot/config.json` の `provider` と `models` に基づく指定値で、プロバイダーが実際に解決したモデルIDを保証するものではありません。取得していないモデル名は捏造しません。失敗コメントの「今回の設定」は、その実行で設定されたAIを示し、API呼び出しの成功を意味しません。既存PRを再利用しただけの実行では新しいAI生成を名乗りません。Botの更新PRはAIを使わないため「AI使用: なし」と記載します。
+
+
+自動更新PRは毎日の確認時に作成します（即時配信ではありません）。同じ版の開いているPRがあれば再利用し、閉じたPRは自動で作り直しません。トークン不足や競合の説明は、同じ版のステータスコメントを更新して通知し、毎日同じコメントを増やしません。PRをマージすると、Bot専用ファイルと導入記録がデフォルトブランチへ反映され、以後のActionsは更新後のBotを使います。APIキーと `config.json` は保持します。
