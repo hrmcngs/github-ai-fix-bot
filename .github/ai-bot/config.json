@@ -38,5 +38,17 @@
     "botFiles": [
       ".github/ai-bot/src/markdown.js"
     ]
+  },
+  "autoMerge": {
+    "enabled": true,
+    "label": "ai-auto-merge",
+    "method": "squash",
+    "requiredChecks": [
+      "test",
+      "fix-validation",
+      "cli-smoke (claude)",
+      "cli-smoke (codex)",
+      "cli-smoke (broker)"
+    ]
   }
 }

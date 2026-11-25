@@ -44,7 +44,7 @@ export async function publishReport({env,gh,bundle,result,event,issueTarget}){
   const command=env.GITHUB_EVENT_NAME==='issue_comment'?`<!-- ai-command:${number(event.comment.id)} -->`:'';
   const prefix=marker(n)+command+'\n';
   const run=`https://github.com/${gh.repo}/actions/runs/${number(env.GITHUB_RUN_ID)}`;
-  const footer=`\n\n[Actionsの実行結果](${run})\n\n自動マージは行いません。人間によるレビューが必要です。`;
+  const footer=`\n\n[Actionsの実行結果](${run})\n\n人間によるレビューが必要です。自動マージは専用ラベルと保護ルールを設定した場合だけ有効です。`;
   const notify=async body=>{
     const rows=await comments(gh,n),own=rows.find(row=>botOwned(row)&&row.body?.startsWith(prefix));
     if(own)await gh.request(gh.path(`/issues/comments/${number(own.id)}`),'PATCH',{body:prefix+body+footer});

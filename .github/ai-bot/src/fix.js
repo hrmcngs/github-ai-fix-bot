@@ -154,7 +154,7 @@ export async function publishFix(env=process.env,ghArg) {
   if(!['admin','maintain','write'].includes(permission.permission))throw new SafeError('ACCESS');
   const commandId=env.GITHUB_EVENT_NAME==='issue_comment'?number(event.comment.id):undefined;
   const runUrl=`https://github.com/${gh.repo}/actions/runs/${number(env.GITHUB_RUN_ID)}`;
-  const footer=`\n\n[Actionsの実行結果](${runUrl})\n\n自動マージは行いません。人間によるレビューが必要です。`;
+  const footer=`\n\n[Actionsの実行結果](${runUrl})\n\n人間によるレビューが必要です。自動マージは専用ラベルと保護ルールを設定した場合だけ有効です。`;
   const failure=async(reason)=>{const body=`修正PRは作成していません。\n\n${markdown(reason)}${footer}`;await post(gh,n,body,commandId);await summary(body,env);};
   if(!result.ok || !verdict.ok){
     let reason=verdict.reason || result.reason || instructions;
