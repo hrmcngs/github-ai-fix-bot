@@ -32,6 +32,7 @@
     ".github/workflows/bot-updates.yml",
     ".github/workflows/proposal-updates.yml",
     ".github/workflows/auto-merge.yml",
-    ".github/ai-bot/src/conflicts.js"
+    ".github/ai-bot/src/conflicts.js",
+    ".github/ai-bot/src/ai-selection.js"
   ]
 }

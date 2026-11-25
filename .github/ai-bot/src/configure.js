@@ -7,9 +7,11 @@ import {config,providers} from './core.js';
 // Inspect script names only; never run project code during setup.
 export function settings(raw,{provider,mode,scripts={},sourcePaths=[]}) {
   config(raw);
-  if(!providers.includes(provider)||!['manual','automatic'].includes(mode))throw new Error('Invalid setup choice');
+  if(!['all',...providers].includes(provider)||!['manual','automatic'].includes(mode))throw new Error('Invalid setup choice');
   const next=structuredClone(raw);
-  next.provider=provider;next.mode=mode;
+  next.provider=provider==='all'?raw.provider:provider;next.mode=mode;
+  if(provider==='all')next.aiMode='all';else delete next.aiMode;
+  delete next.aiProviders;delete next.aiSelection;
   const commands=[];
   if(typeof scripts.check==='string'&&scripts.check.trim())commands.push(['npm','run','check']);
   const tests=typeof scripts.test==='string'&&scripts.test.trim()&&!/no test specified/i.test(scripts.test);

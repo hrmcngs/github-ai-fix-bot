@@ -1,3 +1,4 @@
+import {chooseAI} from './ai-selection.js';
 import {readFile,writeFile,mkdir,appendFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {config,number,scrub,SafeError,aiIdentity} from './core.js';
@@ -63,13 +64,15 @@ export async function prepareRepair(gh,event,env,cfg){
   const target={kind:'issue',number:n,sha:base,title:`PR #${n} の競合修正: ${scrub(pr.title).slice(0,1000)}`,body:scrub(pr.body||'').slice(0,12000)};
   const bundle={version:1,repo:gh.repo,branch:repo.default_branch,cfg,targets:[target],context,repair};
   await mkdir('.work',{recursive:true});await writeFile('.work/fix-bundle.json',JSON.stringify(bundle),{mode:0o600});
-  if(env.GITHUB_OUTPUT)await appendFile(env.GITHUB_OUTPUT,`ready=true\nprovider=${cfg.provider}\nsha=${base}\n`);
+  if(env.GITHUB_OUTPUT)await appendFile(env.GITHUB_OUTPUT,`ready=true\nprovider=${cfg.aiMode==='all'?'all':cfg.provider}\nsha=${base}\n`);
   await reply('競合の修正案を作成します。最新ブランチとの統合後にSecretなしの隔離環境で検証し、成功した場合だけ反映します。');
 }
 export async function publishRepair(gh,event,env,bundle,result,verdict){
   const access=await repairAccess(gh,event,env),{n,pr,repo,base}=access,r=bundle.repair;
   const reply=body=>gh.request(gh.path(`/issues/${n}/comments`),'POST',{body});
-  const fresh=config(JSON.parse(await readFile('.github/ai-bot/config.json','utf8')));
+  const raw=config(JSON.parse(await readFile('.github/ai-bot/config.json','utf8')));
+  const availability=Object.fromEntries((bundle.cfg.aiProviders||[]).map(p=>['AI_BOT_HAS_'+p.toUpperCase(),'true']));
+  const fresh=chooseAI(raw,event,{...env,...availability});
   if(JSON.stringify(fresh)!==JSON.stringify(bundle.cfg)||!fresh.fix?.enabled)throw new SafeError('STALE');
   if(n!==r.number||base!==r.base||base!==bundle.targets[0].sha||pr.head.sha!==r.head||pr.head.ref!==r.headRef||pr.head.repo?.full_name!==r.headRepo||hash([pr.title,pr.body||''])!==r.request)throw new SafeError('STALE');
   const context=await repairContext(gh,pr,base,fresh);

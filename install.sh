@@ -96,8 +96,8 @@ guided_setup() {
   setup_prompt 'このリポジトリに設定しますか？ [y/N]: ' || return 1
   [[ "$REPLY" == y || "$REPLY" == Y ]] || { printf '設定を中止しました。\n'; return 1; }
   while :; do
-    setup_prompt '使うAI：1) 東京都AI  2) Claude  3) Codex [1]: ' || return 1
-    case "$REPLY" in ''|1) provider=tokyo;secret=TOKYO_AI_API_KEY;break ;; 2) provider=claude;secret=ANTHROPIC_API_KEY;break ;; 3) provider=codex;secret=OPENAI_API_KEY;break ;; esac
+    setup_prompt '使うAI：1) 東京都AI  2) Claude  3) Codex  4) 登録済みAIを全部使う [1]: ' || return 1
+    case "$REPLY" in ''|1) provider=tokyo;secret=TOKYO_AI_API_KEY;break ;; 2) provider=claude;secret=ANTHROPIC_API_KEY;break ;; 3) provider=codex;secret=OPENAI_API_KEY;break ;; 4) provider=all;secret=TOKYO_AI_API_KEY;break ;; esac
   done
   while :; do
     setup_prompt '調査の開始方法：1) コメント・手動のみ  2) ラベル・定期調査も有効 [1]: ' || return 1
@@ -105,6 +105,11 @@ guided_setup() {
   done
   node "$root/.github/ai-bot/src/configure.js" "$root" "$provider" "$mode" || return 1
   setup_secret "$repo" "$secret" || true
+  if [[ "$provider" == all ]]; then
+    setup_secret "$repo" ANTHROPIC_API_KEY || true
+    setup_secret "$repo" OPENAI_API_KEY || true
+    printf '登録済みAIの回答を統合担当AIへ送信します。最大4回のAPI利用が発生します。\n'
+  fi
   visibility=$(gh api --hostname github.com "repos/$repo" --jq .private 2>/dev/null) || visibility='unknown'
   if [[ "$visibility" == true ]]; then
     setup_prompt 'privateのIssueと許可したソースの一部を選んだAIへ送信してよいですか？ [y/N]: ' || return 1
@@ -149,6 +154,7 @@ main() {
     .github/ai-bot/package.json
     .github/ai-bot/config.json
     .github/ai-bot/distribution.json
+    .github/ai-bot/src/ai-selection.js
     .github/ai-bot/src/conflicts.js
     .github/ai-bot/src/configure.js
     .github/ai-bot/src/bulk.js
