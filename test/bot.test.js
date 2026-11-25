@@ -201,3 +201,25 @@ test('automatic Issue requires trusted labeler; manual mode never investigates o
     await assert.rejects(readFile('.work/bundle.json'));
   }finally{process.chdir(original);await rm(dir,{recursive:true,force:true});}
 });
+
+
+test('private repository requires an explicit repository opt-in before reading source', async()=>{
+  const original=process.cwd(),dir=await mkdtemp(join(tmpdir(),'ai-bot-private-'));
+  let subsequentReads=0;
+  const gh={repo:'a/b',path:(x='')=>`/repos/a/b${x}`,request:async(path)=>{
+    if(path==='/repos/a/b')return{private:true,default_branch:'main'};
+    subsequentReads++;throw new SafeError('ACCESS');
+  }};
+  try{
+    process.chdir(dir);await mkdir('.github/ai-bot',{recursive:true});
+    await writeFile('.github/ai-bot/config.json',JSON.stringify(cfg));
+    await writeFile('event.json',JSON.stringify({repository:{full_name:'a/b'}}));
+    const env={GITHUB_EVENT_PATH:join(dir,'event.json'),GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_REF:'refs/heads/main'};
+    for(const value of [undefined,'false','TRUE','1']) {
+      await assert.rejects(prepare({...env,ALLOW_PRIVATE_REPOSITORY:value},gh),e=>e.code==='PRIVATE');
+      assert.equal(subsequentReads,0);
+    }
+    await assert.rejects(prepare({...env,ALLOW_PRIVATE_REPOSITORY:'true'},gh),e=>e.code==='ACCESS');
+    assert.equal(subsequentReads,1);
+  }finally{process.chdir(original);await rm(dir,{recursive:true,force:true});}
+});

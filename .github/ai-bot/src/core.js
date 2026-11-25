@@ -9,6 +9,7 @@ export const messages = {
   NETWORK: 'AIとの通信に失敗しました。時間をおいて手動で再実行してください。',
   OUTPUT: 'AIから有効な調査結果を取得できませんでした。',
   CONFIG: 'Botの設定または入力が不正です。READMEを確認してください。',
+  PRIVATE: 'privateリポジトリからAIへの送信は無効です。送信を許可する管理者はRepository Variable AI_BOT_ALLOW_PRIVATEをtrueに設定してください。',
   ACCESS: '対象を取得できませんでした。番号・GitHub権限・Dependabotの有効化を確認してください。',
   RUNTIME: '隔離環境またはAI CLIの実行に失敗しました。キーと対応バージョンを確認してください。',
   INTERNAL: '調査を完了できませんでした。設定と実行環境を確認してください。'

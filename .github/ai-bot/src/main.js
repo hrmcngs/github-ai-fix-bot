@@ -47,7 +47,7 @@ export async function prepare(env = process.env, ghArg) {
   const cfg = config(await json('.github/ai-bot/config.json'));
   const event = await json(env.GITHUB_EVENT_PATH,2000000);
   const repo = await gh.request(gh.path());
-  if (repo.private) throw new SafeError('ACCESS');
+  if (repo.private && env.ALLOW_PRIVATE_REPOSITORY !== 'true') throw new SafeError('PRIVATE');
   if (env.GITHUB_EVENT_NAME === 'schedule' && cfg.mode !== 'automatic') return;
   const branch = repo.default_branch;
   // No workflow or implementation from arbitrary dispatch branches.

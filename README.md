@@ -30,7 +30,7 @@ APIキーの入力、依存パッケージのインストール、コミット�
 4. **Settings → Secrets and variables → Actions → New repository secret** で、選択したAIのSecretを登録します。
 5. Actionsの **AI investigation → Run workflow** で、デフォルトブランチを選び、`target` と `number` を指定します。
 
-既存プロジェクトの `package.json` や `src/` を置き換える必要はありません。Botのコードは `.github/ai-bot/` 内で完結し、外部のnpm依存はありません。Node.jsはワークフローが用意します。CLI実行にはGitHub-hosted Ubuntu runner上のDockerを使用します。self-hosted runner、Windows、privateリポジトリは対象外です。
+既存プロジェクトの `package.json` や `src/` を置き換える必要はありません。Botのコードは `.github/ai-bot/` 内で完結し、外部のnpm依存はありません。Node.jsはワークフローが用意します。CLI実行にはGitHub-hosted Ubuntu runner上のDockerを使用します。self-hosted runner、Windowsは対象外です。privateリポジトリは初期状態では停止します。管理者がAIへの送信を許可する場合に限り、Settings → Secrets and variables → Actions → VariablesにRepository Variable `AI_BOT_ALLOW_PRIVATE` を値 `true` で登録してください。Issue本文と許可パス内のソースの一部が選択したAIへ送信されます。公開範囲は変更しません。
 
 このリポジトリ自体で試す場合も、同じ手順でSecretの登録が必要です。利用者のキーを他人が管理する共通リポジトリに集約しないでください。forkではActionsや定期実行の有効化を確認してください。
 
