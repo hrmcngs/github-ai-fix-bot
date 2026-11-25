@@ -4,15 +4,16 @@ set -euo pipefail
 
 usage() {
   cat <<'HELP'
-Usage: bash install.sh [--directory PATH] [--ref COMMIT_SHA] [--upgrade] [--skip-security-updates]
+Usage: bash install.sh [--directory PATH] [--ref COMMIT_SHA] [--upgrade] [--skip-security-updates] [--setup]
 
 Installs .github/ai-bot/ and the investigation/fix workflows.
 Default destination: root of the current Git repository.
 Default source: hrmcngs/github-ai-fix-bot main, resolved once to a commit.
-Existing config.json is always preserved. Differing files stop installation by default.
+Existing config.json is preserved unless --setup explicitly configures it. Differing Bot files stop installation by default.
 --upgrade backs up replaced Bot files inside Git metadata, then installs the selected version.
 Enables Dependabot alerts/security update PRs using an authenticated GitHub CLI admin session.
 --skip-security-updates leaves repository security settings unchanged.
+--setup opens a Japanese guided setup (requires Node.js 22+, gh and a terminal).
 No keys are requested, and no commits, pushes or Actions runs are performed.
 HELP
 }
@@ -45,8 +46,81 @@ enable_security_updates() {
   fi
 }
 
+setup_prompt() {
+  printf '%s' "$1" >/dev/tty
+  IFS= read -r REPLY </dev/tty || return 1
+}
+setup_secret() {
+  set +x
+  local repo=$1 name=$2 value=''
+  printf '%s（空欄なら変更しません。入力は非表示）: ' "$name" >/dev/tty
+  IFS= read -r -s value </dev/tty || return 1
+  printf '\n' >/dev/tty
+  if [[ -n "$value" ]]; then
+    if ! printf '%s' "$value" | gh secret set "$name" --repo "$repo" >/dev/null 2>&1; then
+      unset value
+      printf 'Secretを登録できませんでした。GitHubの設定画面から登録してください。\n'
+      return 1
+    fi
+    unset value
+    printf '%s を登録しました。\n' "$name"
+  fi
+}
+guided_setup() {
+  local root=$1 repo='' provider='' mode='' secret='' visibility='' defaults='' secret_names=''
+  repo=$(cd "$root" && gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null) || fail 'gh auth login を実行してから --setup を再実行してください。'
+  [[ "$repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || fail '導入先を確認できませんでした。'
+  printf '\nかんたん設定：%s\n' "$repo"
+  setup_prompt 'このリポジトリに設定しますか？ [y/N]: ' || return 1
+  [[ "$REPLY" == y || "$REPLY" == Y ]] || { printf '設定を中止しました。\n'; return 1; }
+  while :; do
+    setup_prompt '使うAI：1) 東京都AI  2) Claude  3) Codex [1]: ' || return 1
+    case "$REPLY" in ''|1) provider=tokyo;secret=TOKYO_AI_API_KEY;break ;; 2) provider=claude;secret=ANTHROPIC_API_KEY;break ;; 3) provider=codex;secret=OPENAI_API_KEY;break ;; esac
+  done
+  while :; do
+    setup_prompt '調査の開始方法：1) コメント・手動のみ  2) ラベル・定期調査も有効 [1]: ' || return 1
+    case "$REPLY" in ''|1) mode=manual;break ;; 2) mode=automatic;break ;; esac
+  done
+  node "$root/.github/ai-bot/src/configure.js" "$root" "$provider" "$mode" || return 1
+  setup_secret "$repo" "$secret" || true
+  gh label create ai-fix --repo "$repo" --description 'AIによる修正PRを依頼' >/dev/null 2>&1 || true
+  gh label create ai-investigate --repo "$repo" --description 'AIによる調査を依頼' >/dev/null 2>&1 || true
+  visibility=$(gh api --hostname github.com "repos/$repo" --jq .private 2>/dev/null) || visibility='unknown'
+  if [[ "$visibility" == true ]]; then
+    setup_prompt 'privateのIssueと許可したソースの一部を選んだAIへ送信してよいですか？ [y/N]: ' || return 1
+    if [[ "$REPLY" == y || "$REPLY" == Y ]]; then
+      gh variable set AI_BOT_ALLOW_PRIVATE --repo "$repo" --body true >/dev/null 2>&1 || printf 'private送信の許可を登録できませんでした。\n'
+    else
+      gh variable set AI_BOT_ALLOW_PRIVATE --repo "$repo" --body false >/dev/null 2>&1 || printf 'private送信の無効化を登録できませんでした。既存設定を確認してください。\n'
+    fi
+  fi
+  setup_prompt 'ActionsによるPR作成を許可しますか？（GitHubではレビュー承認許可と共通の設定です）[y/N]: ' || return 1
+  if [[ "$REPLY" == y || "$REPLY" == Y ]]; then
+    defaults=$(gh api --hostname github.com "repos/$repo/actions/permissions/workflow" --jq .default_workflow_permissions 2>/dev/null) || defaults=''
+    if [[ "$defaults" == read || "$defaults" == write ]]; then
+      gh api --hostname github.com --method PUT "repos/$repo/actions/permissions/workflow" -f "default_workflow_permissions=$defaults" -F can_approve_pull_request_reviews=true >/dev/null 2>&1 || printf 'PR作成許可を変更できませんでした。リポジトリ管理者に確認してください。\n'
+    else
+      printf 'PR作成許可を取得できませんでした。設定画面で確認してください。\n'
+    fi
+  fi
+  printf '\nBot更新PRを受け取る場合だけ、導入先限定のfine-grained PATが必要です。\nContents / Pull requests / Workflows を Read and write にしてください。\n'
+  printf '発行画面：https://github.com/settings/personal-access-tokens/new\n'
+  setup_secret "$repo" AI_BOT_UPDATE_TOKEN || true
+  secret_names=$(gh secret list --repo "$repo" --json name --jq '.[].name' 2>/dev/null) || secret_names=''
+  if ! printf '%s\n' "$secret_names" | grep -Fxq "$secret"; then
+    printf '未完了：%s の登録を確認できません。試運転前にSecrets画面で登録してください。\n' "$secret"
+  fi
+  if ! printf '%s\n' "$secret_names" | grep -Fxq AI_BOT_UPDATE_TOKEN; then
+    printf 'Bot更新PR：トークンを確認できません。必要な場合は後から登録できます。\n'
+  fi
+  printf '\n設定ファイル：%s/.github/ai-bot/config.json\n' "$root"
+  printf '残り：git diffを確認し、BotファイルをPRでデフォルトブランチへ取り込んでください。\n'
+  printf '取り込み後、Issueに /ai-investigate とコメントすると試せます。\n'
+  printf 'Secrets確認：https://github.com/%s/settings/secrets/actions\n' "$repo"
+}
+
 main() {
-  local destination='' commit='' remote_ref='' root='' relative='' parent='' upgrade=false security_updates=true backup='' git_dir='' pending='' replace_count=0
+  local destination='' commit='' remote_ref='' root='' relative='' parent='' upgrade=false setup=false security_updates=true backup='' git_dir='' pending='' replace_count=0
   local -a replaced=()
   local -a files=(
     .github/ai-bot/.dockerignore
@@ -55,6 +129,7 @@ main() {
     .github/ai-bot/package.json
     .github/ai-bot/config.json
     .github/ai-bot/distribution.json
+    .github/ai-bot/src/configure.js
     .github/ai-bot/src/bulk.js
     .github/ai-bot/src/updates.js
     .github/ai-bot/src/core.js
@@ -83,6 +158,7 @@ main() {
   while (($#)); do
     case "$1" in
       --upgrade) upgrade=true; shift ;;
+      --setup) setup=true; shift ;;
       --skip-security-updates) security_updates=false; shift ;;
       --directory) (($# >= 2)) || fail '--directory requires a path'; destination=$2; shift 2 ;;
       --ref) (($# >= 2)) || fail '--ref requires a commit SHA'; commit=$2; shift 2 ;;
@@ -92,6 +168,12 @@ main() {
   done
   command -v git >/dev/null 2>&1 || fail 'git is required'
   command -v curl >/dev/null 2>&1 || fail 'curl is required'
+  if [[ "$setup" == true ]]; then
+    command -v gh >/dev/null 2>&1 || fail 'GitHub CLIが必要です。ghをインストールし、gh auth login を実行してください。'
+    command -v node >/dev/null 2>&1 || fail 'かんたん設定にはNode.js 22以上が必要です。'
+    [[ $(node -p 'Number(process.versions.node.split(".")[0]) >= 22') == true ]] || fail 'Node.js 22以上が必要です。'
+    ( : </dev/tty ) 2>/dev/null || fail '--setup はターミナルから実行してください。'
+  fi
   destination=${destination:-.}
   root=$(git -C "$destination" rev-parse --show-toplevel 2>/dev/null) || fail 'Run inside a Git working tree, or specify --directory PATH'
   root=$(cd "$root" && pwd -P)
@@ -188,6 +270,7 @@ main() {
     cp "$staging/installation.json" "$pending" && chmod 644 "$pending" && mv -f "$pending" "$root/.github/ai-bot/installation.json" || fail "Could not write installation record. Backup: $backup"
     pending=''
   fi
+  if [[ "$setup" == true ]]; then guided_setup "$root" || fail '設定が完了しませんでした。保存済みの設定はgit diffとSecretsで確認してください。'; fi
   if [[ "$security_updates" == true ]]; then enable_security_updates "$root"; fi
   printf '\nInstalled in: %s\nSource commit: %s\n' "$root" "$commit"
   cat <<'NEXT'
