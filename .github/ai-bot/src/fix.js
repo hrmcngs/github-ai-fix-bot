@@ -9,6 +9,7 @@ import { GitHub, botOwned, comments } from './github.js';
 import { collectFiles, issueTarget } from './main.js';
 import { tokyo, agent, command } from './providers.js';
 import { isCommand, requireCommand } from './commands.js';
+import { markdown } from './markdown.js';
 import { editable, fixConfig, fixPrompt, parsePlan, planHash, fixId, literal } from './fix-core.js';
 const exec = promisify(execFile);
 const marker = n => `<!-- ai-fix:issue:${number(n)} -->`;
@@ -147,7 +148,7 @@ export async function publishFix(env=process.env,ghArg) {
   if(!['admin','maintain','write'].includes(permission.permission))throw new SafeError('ACCESS');
   const runUrl=`https://github.com/${gh.repo}/actions/runs/${number(env.GITHUB_RUN_ID)}`;
   const footer=`\n\n[Actionsの実行結果](${runUrl})\n\n自動マージは行いません。人間によるレビューが必要です。`;
-  const failure=async(reason)=>{const body=`修正PRは作成していません。\n\n${literal(reason)}${footer}`;await post(gh,n,body);await summary(body,env);};
+  const failure=async(reason)=>{const body=`修正PRは作成していません。\n\n${markdown(reason)}${footer}`;await post(gh,n,body);await summary(body,env);};
   if(!result.ok || !verdict.ok){
     let reason=verdict.reason || result.reason || instructions;
     if(result.ok){try{const proposal=parsePlan(result.plan,bundle);if(proposal.summary!==reason)reason+=`\n\nAIの調査結果:\n${proposal.summary}`;}catch{}}
@@ -181,13 +182,13 @@ export async function publishFix(env=process.env,ghArg) {
   let branchCreated=false,pr;
   try{
     await gh.request(gh.path('/git/refs'),'POST',{ref:`refs/heads/${branch}`,sha:commit.sha});branchCreated=true;
-    const body=`${marker(n)}\nCloses #${n}\n\nAI (${bundle.cfg.provider}) による修正提案です。人間のレビューが必要です。\n\n${literal(plan.summary)}\n\n検証対象SHA: \`${target.sha}\`\n変更したJavaScriptの構文チェック: 成功\nオフライン・Secretなし環境での検証: 成功\n\n${literal(settings.commands.map(args=>args.join(' ')).join('\n'))}\n\nネットワークを必要とする検証は行っていません。検証成功は修正の正しさを保証しません。${footer}`;
+    const body=`${marker(n)}\nCloses #${n}\n\nAI (${bundle.cfg.provider}) による修正提案です。人間のレビューが必要です。\n\n${markdown(plan.summary)}\n\n検証対象SHA: \`${target.sha}\`\n変更したJavaScriptの構文チェック: 成功\nオフライン・Secretなし環境での検証: 成功\n\n${literal(settings.commands.map(args=>args.join(' ')).join('\n'))}\n\nネットワークを必要とする検証は行っていません。検証成功は修正の正しさを保証しません。${footer}`;
     pr=await gh.request(gh.path('/pulls'),'POST',{title:`fix: address issue #${n}`,head:branch,base:bundle.branch,body});
   }catch{
     if(branchCreated)await gh.request(gh.path(`/git/refs/heads/${branch}`),'DELETE').catch(()=>{});
     await failure(reasons.PR);throw new SafeError('PR');
   }
-  const body=`修正案をPR #${number(pr.number)} に作成しました。\n\n${literal(plan.summary)}\n\n構文チェックと設定された検証は成功しました。変更内容とテストの妥当性をレビューしてください。${footer}`;
+  const body=`修正案をPR #${number(pr.number)} に作成しました。\n\n${markdown(plan.summary)}\n\n構文チェックと設定された検証は成功しました。変更内容とテストの妥当性をレビューしてください。${footer}`;
   await post(gh,n,body);await summary(body,env);
 }
 if(process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href){

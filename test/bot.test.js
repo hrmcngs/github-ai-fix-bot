@@ -20,14 +20,16 @@ test('strict configuration and routing reject unsafe input', () => {
   assert.equal(allowedPath('src/app.js',cfg),true);
   for (const path of ['src/.env','src/.codex/hook.js','src/node_modules/a.js','src/secrets.js','src/key.pem','src/a.min.js','src/a.js/../secret.js','README.md']) assert.equal(allowedPath(path,cfg),false,path);
 });
-test('redaction and inert comment rendering', () => {
+test('redaction and Markdown comment rendering', () => {
   const key='dummy-key-for-tests';
   assert.equal(scrub(`${key} ${encodeURIComponent(key)} ${Buffer.from(key).toString('base64')}`,[key]),'[REDACTED] [REDACTED] [REDACTED]');
   assert.equal(scrub('api_key="abcdefghijklmnop"'),'api_key="[REDACTED]"');
   const out=comment({ok:true,provider:'tokyo',text:'```\n@everyone <img src="https://evil">\n```\n[click](https://evil)'},{kind:'issue',number:1,sha,fingerprint:fp},'https://github.com/a/b/actions/runs/1');
-  assert.ok(out.includes('````text'));
-  assert.ok(!out.includes('@everyone'));
-  assert.ok(!out.includes('<img'));
+  assert.ok(!out.includes('````text'));
+  assert.ok(out.includes('```\n@everyone <img src="https://evil">\n```'));
+  const prose=comment({ok:true,provider:'tokyo',text:'## 要約\n\n- **確認** @everyone <img src="https://evil">'},{kind:'issue',number:1,sha,fingerprint:fp},'');
+  assert.ok(prose.includes('## 要約'));assert.ok(prose.includes('- **確認**'));
+  assert.ok(!prose.includes('@everyone'));assert.ok(!prose.includes('<img'));
   assert.ok(!out.includes('](javascript:'));
   assert.throws(()=>cleanOutput(''));
   assert.throws(()=>comment({ok:true,provider:'evil',text:'x'},{kind:'issue',number:1,sha,fingerprint:fp},''));

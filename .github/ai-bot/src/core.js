@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { markdown } from './markdown.js';
 
 export class SafeError extends Error {
   constructor(code) { super(code); this.code = code; }
@@ -61,8 +62,7 @@ export function cleanOutput(text, secrets = [], limit = 18000) {
 }
 export function comment(result, target, runUrl) {
   if (!/^[a-f0-9]{64}$/.test(target.fingerprint) || !/^[a-f0-9]{40}$/.test(target.sha) || !providers.includes(result.provider) || typeof result.ok !== 'boolean') throw new SafeError('OUTPUT');
-  const text = cleanOutput(result.text).replaceAll('@', '@\u200b').replaceAll('<', '＜').replaceAll('>', '＞');
-  const fence = '`'.repeat(Math.max(3, ...[...text.matchAll(/`+/g)].map(m => m[0].length + 1)));
+  const text = markdown(cleanOutput(result.text));
   const url = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/actions\/runs\/\d+$/.test(runUrl) ? runUrl : '';
-  return `<!-- ai-bot:${target.fingerprint}:${result.ok ? 'ok' : 'error'} -->\n### AI調査結果: ${target.kind} #${number(target.number)}\n\nAI: ${result.provider} / 対象SHA: \`${target.sha}\`\n\nAIによる静的調査です。コード変更・テスト・静的解析は実施していません。人間による確認が必要です。\n\n${fence}text\n${text}\n${fence}\n\n${url ? `[Actionsの実行結果](${url})` : ''}`;
+  return `<!-- ai-bot:${target.fingerprint}:${result.ok ? 'ok' : 'error'} -->\n### AI調査結果: ${target.kind} #${number(target.number)}\n\nAI: ${result.provider} / 対象SHA: \`${target.sha}\`\n\nAIによる静的調査です。コード変更・テスト・静的解析は実施していません。人間による確認が必要です。\n\n${text}\n\n${url ? `[Actionsの実行結果](${url})` : ''}`;
 }
