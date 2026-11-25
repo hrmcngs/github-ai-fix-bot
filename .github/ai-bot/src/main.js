@@ -3,7 +3,7 @@ import { pathToFileURL } from 'node:url';
 import { config, number, allowedPath, scrub, fingerprint, prompt, cleanOutput, comment, SafeError, messages } from './core.js';
 import { GitHub, comments, reportIssue, completed, botOwned, REPORT_MARKER } from './github.js';
 import { tokyo, agent } from './providers.js';
-import { isCommand, requireCommand } from './commands.js';
+import { isCommand, requireCommand, referenceChoice } from './commands.js';
 import { openReport, publishReport } from './report-pr.js';
 import {issueRevision,previousProposals} from './proposal-state.js';
 
@@ -49,6 +49,7 @@ export async function prepare(env = process.env, ghArg) {
   const gh = ghArg || new GitHub(env.GITHUB_REPOSITORY, env.GH_TOKEN);
   const cfg = config(await json('.github/ai-bot/config.json'));
   const event = await json(env.GITHUB_EVENT_PATH,2000000);
+  cfg.referencePreviousPRs=referenceChoice(event,env,cfg);
   const reportPR = isCommand(event,env,'/ai-report-pr') || (env.GITHUB_EVENT_NAME === 'workflow_dispatch' && event.inputs?.result === 'report-pr');
   if (env.GITHUB_EVENT_NAME === 'issue_comment' && !isCommand(event,env,'/ai-investigate') && !reportPR) return;
   const repo = await gh.request(gh.path());
@@ -94,7 +95,7 @@ export async function prepare(env = process.env, ghArg) {
     if (pending.length >= cfg.maxTargetsPerRun) break;
   }
   if (!pending.length) return;
-  const existingReportPR = reportPR ? (await openReport(gh,pending[0]))?.number : undefined;
+  const existingReportPR = reportPR ? (await openReport(gh,pending[0],cfg.referencePreviousPRs))?.number : undefined;
   const context = existingReportPR ? {files:[],omittedFiles:0} : await collectFiles(gh,sha,cfg,pending);
   if(reportPR&&!existingReportPR)context.previousProposals=await previousProposals(gh,'report',pending[0],cfg);
   await save('.work/bundle.json',{ version: 1, repo: gh.repo, cfg, targets: pending, context, reportPR, existingReportPR });

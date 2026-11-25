@@ -83,3 +83,22 @@ test('edit workflow requires title/body changes, trusted actor and default branc
     gh=github([proposal()]);await updateProposals(env,gh);assert.equal(gh.calls.length,0);
   }finally{await rm(dir,{recursive:true,force:true});}
 });
+test('reference selection supports config, explicit commands and dispatch choices',async()=>{
+  const {referenceChoice}=await import('../.github/ai-bot/src/commands.js');
+  const env={GITHUB_EVENT_NAME:'issue_comment'};
+  assert.equal(referenceChoice({comment:{body:'/ai-fix'}},env,{}),true);
+  assert.equal(referenceChoice({comment:{body:'/ai-fix'}},env,{referencePreviousPRs:false}),false);
+  assert.equal(referenceChoice({comment:{body:'/ai-fix --reference'}},env,{referencePreviousPRs:false}),true);
+  assert.equal(referenceChoice({comment:{body:'/ai-report-pr --no-reference'}},env,{}),false);
+  for(const [value,expected] of [['default',false],['on',true],['off',false]])assert.equal(referenceChoice({inputs:{reference_previous:value}},{GITHUB_EVENT_NAME:'workflow_dispatch'},{referencePreviousPRs:false}),expected);
+  assert.throws(()=>referenceChoice({inputs:{reference_previous:'invalid'}},{GITHUB_EVENT_NAME:'workflow_dispatch'},{}));
+  assert.throws(()=>referenceChoice({},env,{referencePreviousPRs:'false'}));
+});
+test('disabled references make no API requests and do not reuse proposals made with a different choice',async()=>{
+  const gh={list:async()=>assert.fail('No old PR lookup'),path:p=>p};
+  assert.deepEqual(await previousProposals(gh,'fix',issue,{...cfg,referencePreviousPRs:false}),[]);
+  const on=proposal(9,'fix',issue),off=proposal(10,'fix',issue);
+  on.body=on.body.replace('Closes #2','<!-- ai-reference-previous:on -->\nCloses #2');off.body=off.body.replace('Closes #2','<!-- ai-reference-previous:off -->\nCloses #2');
+  assert.equal((await currentProposal(github([on,off]),'fix',issue,false)).number,10);
+  assert.equal((await currentProposal(github([on,off]),'fix',issue,true)).number,9);
+});

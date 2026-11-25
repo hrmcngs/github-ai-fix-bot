@@ -15,11 +15,14 @@ export function ownedProposal(pr,gh,kind,n){
     &&pr.head?.repo?.full_name===gh.repo&&pr.base?.repo?.full_name===gh.repo
     &&new RegExp(`^ai-${kind}/issue-${n}-[a-f0-9]{12}-[1-9]\\d*$`).test(pr.head.ref);
 }
-export async function currentProposal(gh,kind,issue){
-  return (await gh.list(gh.path('/pulls?state=open'))).find(pr=>ownedProposal(pr,gh,kind,issue.number)&&sameRevision(pr,issue));
+export const referenceMarker=enabled=>`<!-- ai-reference-previous:${enabled?'on':'off'} -->`;
+export function sameReference(pr,enabled){return pr.body?.split('\n')[2]===referenceMarker(enabled) || (enabled&&!pr.body?.includes('<!-- ai-reference-previous:'));}
+export async function currentProposal(gh,kind,issue,reference){
+  return (await gh.list(gh.path('/pulls?state=open'))).find(pr=>ownedProposal(pr,gh,kind,issue.number)&&sameRevision(pr,issue)&&(reference===undefined||sameReference(pr,reference)));
 }
 // Prior patches are bounded, scrubbed data, never instructions or executable input.
 export async function previousProposals(gh,kind,issue,cfg){
+  if(cfg.referencePreviousPRs===false)return [];
   const rows=await gh.list(gh.path('/pulls?state=all&sort=created&direction=desc'));
   const previous=[];
   for(const pr of rows.filter(pr=>ownedProposal(pr,gh,kind,issue.number)&&!sameRevision(pr,issue)).slice(0,2)){
@@ -49,7 +52,7 @@ export async function closeOutdated(gh,issue){
     const pr=await gh.request(gh.path(`/pulls/${number(candidate.number)}`));
     if(pr.state!=='open'||!ownedProposal(pr,gh,kind,issue.number)||sameRevision(pr,current))continue;
     await gh.request(gh.path(`/pulls/${number(pr.number)}`),'PATCH',{state:'closed'});
-    await gh.request(gh.path(`/issues/${number(pr.number)}/comments`),'POST',{body:`Issue #${number(issue.number)} の本文またはタイトルが更新されたため、旧版の提案を閉じました。ブランチと履歴は保持します。次の実行ではこのPRを参考資料にして、現在のIssueから再検討します。`});
+    await gh.request(gh.path(`/issues/${number(pr.number)}/comments`),'POST',{body:`Issue #${number(issue.number)} の本文またはタイトルが更新されたため、旧版の提案を閉じました。ブランチと履歴は保持します。次の実行では旧PRを参照するか選択できます。現在のIssueを優先して再検討します。`});
     closed.push(number(pr.number));
   }
   return closed;

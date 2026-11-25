@@ -112,3 +112,31 @@ test('fix replies follow each new command; rerunning one command updates only it
   await assert.rejects(publishFix(env,rerun),e=>e.code==='VALIDATION');
   assert.equal(rerun.calls.find(c=>c.method==='PATCH').path,'/repos/a/b/issues/comments/789');
 }));
+test('reference options accept only exact standalone syntax and preserve live-comment authorization',async()=>{
+  const env=envFor('/tmp');
+  for(const command of ['/ai-fix','/ai-report-pr']){
+    for(const flag of ['--reference','--no-reference']){
+      const text=`${command} ${flag}`,event=eventFor(text);
+      assert.equal(isCommand(event,env,command),true);
+      assert.equal(await requireCommand(github(text),event,env,command),2);
+      await assert.rejects(requireCommand(github(text,{body:command}),event,env,command),e=>e.code==='ACCESS');
+    }
+    for(const suffix of ['--reference --no-reference','--reference now','--unknown','\n--reference'])assert.equal(isCommand(eventFor(`${command} ${suffix}`),env,command),false);
+  }
+  assert.equal(isCommand(eventFor('/ai-investigate --reference'),env,'/ai-investigate'),false);
+});
+test('no-reference command and configured default are persisted without reading prior PR patches',()=>fixture(async({env})=>{
+  for(const [command,action,file] of [['/ai-fix',prepareFix,'.work/fix-bundle.json'],['/ai-report-pr',prepare,'.work/bundle.json']]){
+    for(const explicit of [true,false]){
+      const text=explicit?`${command} --no-reference`:command;
+      await writeFile('event.json',JSON.stringify(eventFor(text)));
+      await writeFile('.github/ai-bot/config.json',JSON.stringify({...cfg,referencePreviousPRs:explicit}));
+      const gh=github(text);let oldReads=0;
+      gh.list=async path=>{if(path.includes('state=all')||path.endsWith('/files'))oldReads++;return[];};
+      await action(env,gh);
+      const bundle=JSON.parse(await readFile(file));
+      assert.equal(bundle.cfg.referencePreviousPRs,false);
+      assert.deepEqual(bundle.context.previousProposals,[]);assert.equal(oldReads,0);
+    }
+  }
+}));
