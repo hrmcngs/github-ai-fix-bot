@@ -50,7 +50,9 @@ await new Promise((resolve,reject)=>{
     await validateFix({GITHUB_REPOSITORY:'a/b'});
     return JSON.parse(await readFile('.work/fix-verdict.json'));
   };
-  assert.equal((await validate(goodSource)).ok,true,'A correct fix must pass the real offline Docker validator');
+  const passing=await validate(goodSource);
+  console.log('Fixture verifier result:',JSON.stringify(passing));
+  assert.equal(passing.ok,true,'A correct fix must pass the real offline Docker validator');
   assert.equal((await validate('export const add=(a,b)=>0;\n')).ok,false,'A test failure must block publication');
   assert.equal((await validate('export const add=;\n')).ok,false,'Invalid syntax must block publication');
   console.log('Docker validation passed: correct fix, failing tests, syntax failure, no credentials, read-only toolchain and blocked network.');
