@@ -31,6 +31,7 @@
     ".github/workflows/investigate-one.yml",
     ".github/workflows/bot-updates.yml",
     ".github/workflows/proposal-updates.yml",
-    ".github/workflows/auto-merge.yml"
+    ".github/workflows/auto-merge.yml",
+    ".github/ai-bot/src/conflicts.js"
   ]
 }

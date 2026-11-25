@@ -1,3 +1,4 @@
+import {prepareRepair,publishRepair} from './conflicts.js';
 import {workerEvent} from './bulk.js';
 import { readFile, writeFile, mkdir, appendFile, stat, chmod, rm } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
@@ -13,7 +14,7 @@ import { isCommand, requireCommand, referenceChoice } from './commands.js';
 import { markdown } from './markdown.js';
 import { proposalLink, createLinkedProposal } from './proposals.js';
 import {currentProposal,previousProposals,previousLinks,revisionMarker,referenceMarker} from './proposal-state.js';
-import { editable, fixConfig, fixPrompt, parsePlan, planHash, fixId, literal, validationResult, validationFailure } from './fix-core.js';
+import { changeable, editable, fixConfig, fixPrompt, parsePlan, planHash, fixId, literal, validationResult, validationFailure } from './fix-core.js';
 const exec = promisify(execFile);
 const marker = n => `<!-- ai-fix:issue:${number(n)} -->`;
 const instructions = '修正PRを作成できませんでした。Issueの具体性、許可パス、検証設定を確認してください。';
@@ -47,9 +48,10 @@ async function post(gh,n,body,commandId) {
 export async function prepareFix(env=process.env,ghArg) {
   const gh=ghArg || new GitHub(env.GITHUB_REPOSITORY,env.GH_TOKEN);
   const cfg=config(await json('.github/ai-bot/config.json'));
-  const settings=fixConfig(cfg);
-  if(!settings.enabled)return;
   const event=workerEvent(env,await json(env.GITHUB_EVENT_PATH,2000000));
+  if(env.GITHUB_EVENT_NAME==='issue_comment'&&event.issue?.pull_request)return prepareRepair(gh,event,env,cfg);
+  if(!cfg.fix?.enabled)return;
+  const settings=fixConfig(cfg);
   cfg.referencePreviousPRs=referenceChoice(event,env,cfg);
   if(!['issues','workflow_dispatch','issue_comment'].includes(env.GITHUB_EVENT_NAME))throw new SafeError('ACCESS');
   if(env.GITHUB_EVENT_NAME==='issues' && (event.action!=='labeled' || event.label?.name!==settings.label))return;
@@ -84,7 +86,7 @@ export async function prepareFix(env=process.env,ghArg) {
 export async function generateFix(env=process.env,providers={tokyo,agent}) {
   const bundle=await json('.work/fix-bundle.json');bundleValid(bundle,env);
   try {
-    if(!bundle.context.files.some(f=>editable(f.path,bundle.cfg))) {
+    if(!bundle.context.files.some(f=>changeable(f.path,bundle))) {
       await save('.work/fix-plan.json',{ok:true,plan:{confidence:'low',summary:'取得資料に変更可能な既存JavaScriptファイルがありません。includeの設定とIssueに関連するファイルを確認してください。',changes:[]}});return;
     }
     const input=fixPrompt(bundle);
@@ -139,6 +141,7 @@ export async function publishFix(env=process.env,ghArg) {
   const result=await json('.work/fix-plan.json',100000),verdict=await json('.work/fix-verdict.json',100000);
   const event=workerEvent(env,await json(env.GITHUB_EVENT_PATH,2000000));
   const target=bundle.targets[0],n=number(target.number);
+  if(bundle.repair)return publishRepair(gh,event,env,bundle,result,verdict);
   const settings=fixConfig(bundle.cfg);
   if(!settings.enabled)throw new SafeError('ACCESS');
   if(event.repository?.full_name!==gh.repo)throw new SafeError('ACCESS');

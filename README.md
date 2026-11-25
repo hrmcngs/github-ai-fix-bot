@@ -33,6 +33,10 @@ write権限以上の利用者がIssueへ新しいコメントを投稿します�
 | `/ai-report-pr` | 調査結果をMarkdownのPRにし、Issueへリンクを返信 |
 | `/ai-fix` | コード修正を検証し、成功時にPRを作成してリンクを返信 |
 
+PRに `/ai-fix` とコメントすると、競合の統合案を作成・検証します。既存JavaScript・Markdownの変更3ファイルまでに対応します。同じリポジトリなら元PRへ追加、forkなら別PRで提案します。[対応範囲](docs/guide.md#prの競合修正とラベル作成)
+
+必要なラベルは導入時に自動作成します（ログイン済みの `gh` と権限が必要）。自動マージの有効化は別の設定です。
+
 `ai-fix` ラベルでも修正を開始できます（`fix.enabled: true` が必要）。調査ラベル・定期調査は `mode: automatic` で有効になります。
 
 **全件実行：** Actionsの **AI investigation** または **AI fix → Run workflow** で、番号を空欄にします。Dependabotは調査のみ対応します。
