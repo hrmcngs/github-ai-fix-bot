@@ -154,6 +154,7 @@ main() {
     .github/ai-bot/package.json
     .github/ai-bot/config.json
     .github/ai-bot/distribution.json
+    .github/ai-bot/src/review.js
     .github/ai-bot/src/ai-selection.js
     .github/ai-bot/src/conflicts.js
     .github/ai-bot/src/configure.js
@@ -174,6 +175,7 @@ main() {
     .github/ai-bot/src/fix-core.js
     .github/ai-bot/src/fix.js
     .github/ai-bot/src/verify-container.js
+    .github/workflows/review.yml
     .github/workflows/investigate.yml
     .github/workflows/fix.yml
     .github/workflows/fix-one.yml
