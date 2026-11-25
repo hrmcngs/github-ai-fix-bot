@@ -8,7 +8,7 @@ import {isCommand,requireCommand} from './commands.js';
 export function workerEvent(env,event){
   if(env.GITHUB_EVENT_NAME!=='workflow_dispatch'||env.AI_BOT_WORKER!=='true')return event;
   return {...event,inputs:{...event.inputs,number:env.AI_BOT_NUMBER,target:env.AI_BOT_TARGET,
-    result:env.AI_BOT_RESULT||'comment',reference_previous:env.AI_BOT_REFERENCE||'default'}};
+    result:env.AI_BOT_RESULT||'comment',reference_previous:env.AI_BOT_REFERENCE||'default',ai:env.AI_BOT_AI||'default'}};
 }
 export async function selectTargets(gh,event,env,cfg,mode){
   if(!['fix','investigate'].includes(mode))throw new SafeError('CONFIG');

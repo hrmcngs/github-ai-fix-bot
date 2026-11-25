@@ -2,14 +2,24 @@ import { number, SafeError } from './core.js';
 
 export function commandMatches(body,command){
   if(typeof body!=='string')return false;
-  const text=body.trim();
-  return text===command || (['/ai-fix','/ai-report-pr'].includes(command) && ['--reference','--no-reference'].some(flag=>text===`${command} ${flag}`));
+  if(/[\r\n]/.test(body.trim()))return false;
+  const parts=body.trim().split(/\s+/);
+  if(parts.shift()!==command)return false;
+  let ai=false,reference=false;
+  while(parts.length){
+    const flag=parts.shift();
+    if(flag==='--ai'&&!ai&&['/ai-fix','/ai-investigate','/ai-report-pr'].includes(command)){ai=true;if(!['tokyo','claude','codex','all'].includes(parts.shift()))return false;}
+    else if(['--reference','--no-reference'].includes(flag)&&!reference&&['/ai-fix','/ai-report-pr'].includes(command))reference=true;
+    else return false;
+  }
+  return true;
 }
 export function referenceChoice(event,env,cfg){
   const fallback=cfg.referencePreviousPRs??true;
   if(typeof fallback!=='boolean')throw new SafeError('CONFIG');
   if(env.GITHUB_EVENT_NAME==='issue_comment'){
-    const text=event.comment?.body?.trim();
+    const parts=event.comment?.body?.trim().split(/\s+/)||[];
+    const text=parts.filter((p,i)=>p!=='--ai'&&parts[i-1]!=='--ai').join(' ');
     if(['/ai-fix','/ai-report-pr'].some(command=>text===`${command} --reference`))return true;
     if(['/ai-fix','/ai-report-pr'].some(command=>text===`${command} --no-reference`))return false;
   }
