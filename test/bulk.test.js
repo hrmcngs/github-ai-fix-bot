@@ -43,6 +43,8 @@ test('reusable workers isolate artifact names between target jobs and keep keys 
   for(const name of ['fix','investigate']){
     const text=await readFile(new URL(`../.github/workflows/${name}-one.yml`,import.meta.url),'utf8');
     assert.ok(text.includes('workflow_call:'));
+    assert.ok(!text.includes('ref: ${{ needs.prepare.outputs.sha }}'));
+    assert.equal([...text.matchAll(/uses: actions\/checkout@/g)].length,[...text.matchAll(/ref: \$\{\{ github.event.repository.default_branch \}\}/g)].length);
     for(const match of text.matchAll(/name: ((?:fix|investigation)-(?:bundle|plan|verdict|result)[^\n]*)/g))assert.ok(match[1].includes('inputs.number'));
   }
   const fix=await readFile(new URL('../.github/workflows/fix-one.yml',import.meta.url),'utf8');
