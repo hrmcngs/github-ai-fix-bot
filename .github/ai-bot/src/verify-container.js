@@ -2,7 +2,7 @@
 import { readFile, writeFile, lstat, mkdir, readdir, chmod } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
-const env={ PATH:'/usr/local/bin:/usr/bin:/bin', HOME:'/tmp/home', TMPDIR:'/tmp', CI:'true', npm_config_cache:'/tmp/npm', npm_config_userconfig:'/dev/null', npm_config_globalconfig:'/dev/null', npm_config_offline:'true', npm_config_ignore_scripts:'true', npm_config_update_notifier:'false' };
+const env={ PATH:'/usr/local/bin:/usr/bin:/bin', HOME:'/tmp/home', TMPDIR:'/tmp', CI:'true', npm_config_cache:'/tmp/npm', npm_config_userconfig:'/opt/ai-bot/npm-user.npmrc', npm_config_globalconfig:'/opt/ai-bot/npm-global.npmrc', npm_config_offline:'true', npm_config_ignore_scripts:'true', npm_config_update_notifier:'false' };
 const report={version:1,ok:false,stage:'setup',checks:[]};
 async function readonly(dir) {
   for(const entry of await readdir(dir,{withFileTypes:true})) {
@@ -21,7 +21,8 @@ function run(argv,record=false) {
     const output=String(result.stderr||'')+String(result.stdout||'');
     let detail='';
     if(!ok){
-      if(result.error?.code==='ETIMEDOUT'||result.signal==='SIGTERM')detail='TIMEOUT';
+      if(/double-loading config/i.test(output))detail='CONFIG_CONFLICT';
+      else if(result.error?.code==='ETIMEDOUT'||result.signal==='SIGTERM')detail='TIMEOUT';
       else if(/EACCES|Permission denied/i.test(output)||result.error?.code==='EACCES')detail='PERMISSION_DENIED';
       else if(/ENOENT|not found|is required/i.test(output)||result.error?.code==='ENOENT')detail='MISSING_TOOL';
     }
