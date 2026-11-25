@@ -43,16 +43,11 @@ test('distribution manifest agrees with installer and rejects arbitrary paths',a
   for(const bad of ['src/app.js','.github/ai-bot/../config.json','.github/workflows/../../app.js',STATE])assert.throws(()=>manifest({version:1,files:[MANIFEST,bad]}));
   assert.throws(()=>installation({version:1,source:'evil/repo',commit:old,files:{}}));
 });
-test('update checks ask in an Issue once per version and respect dismissal',async()=>{
-  let f=fixture();await checkUpdate(f.gh,f.state,f.source);
-  const create=f.gh.calls.find(c=>c.method==='POST');assert.equal(create.p,'/repos/a/b/issues');assert.ok(create.body.body.includes('/ai-update'));assert.ok(create.body.title.includes('更新'));
-  f=fixture({issues:[{...f.notice,state:'closed'}]});await checkUpdate(f.gh,f.state,f.source);assert.equal(f.gh.calls.length,0);
-  f=fixture();const same=await release(f.source);await checkUpdate(f.gh,{...f.state,files:same.files},f.source);assert.equal(f.gh.calls.length,0);
-});
-test('a newer version updates an existing open notification instead of creating duplicate Issues',async()=>{
-  const f=fixture();f.gh.list=async()=>[{...f.notice,body:f.notice.body.replace(latest,old)}];
-  await checkUpdate(f.gh,f.state,f.source);
-  assert.equal(f.gh.calls[0].method,'PATCH');assert.equal(f.gh.calls[0].p,'/repos/a/b/issues/9');
+test('update checks return the immutable changed version without reading or creating Issues',async()=>{
+  const f=fixture();assert.deepEqual(await checkUpdate(f.gh,f.state,f.source),{commit:latest});
+  assert.equal(f.gh.calls.length,0);
+  const same=await release(f.source);assert.equal(await checkUpdate(f.gh,{...f.state,files:same.files},f.source),undefined);
+  assert.equal(f.gh.calls.length,0);
 });
 test('only authorized exact commands on the unchanged bot notice can create updates',async()=>{
   const f=fixture();assert.equal((await authorizeUpdate(f.gh,f.event,f.env)).commit,latest);
@@ -127,28 +122,29 @@ test('missing or malformed installation records reply safely to an authorized up
 });
 
 function automatic(f,trigger='schedule'){
-  return{...f.env,GITHUB_EVENT_NAME:trigger,AI_BOT_UPDATE_AUTOMATIC:'true',AI_BOT_UPDATE_ISSUE:'9',AI_BOT_UPDATE_COMMIT:latest};
+  return{...f.env,GITHUB_EVENT_NAME:trigger,AI_BOT_UPDATE_AUTOMATIC:'true',AI_BOT_UPDATE_COMMIT:latest};
 }
-test('scheduled detection returns a pinned target for new and existing open notices, never dismissed notices',async()=>{
-  let f=fixture();assert.deepEqual(await checkUpdate(f.gh,f.state,f.source),{number:9,commit:latest});
-  f=fixture({issues:[f.notice]});assert.deepEqual(await checkUpdate(f.gh,f.state,f.source),{number:9,commit:latest});
-  assert.equal(f.gh.calls.length,0);
-  f=fixture({issues:[{...f.notice,state:'closed'}]});assert.equal(await checkUpdate(f.gh,f.state,f.source),undefined);
+test('scheduled detection is independent of old notification Issues',async()=>{
+  let f=fixture();f=fixture({issues:[{...f.notice,state:'closed'}]});
+  f.gh.list=async()=>assert.fail('No Issue lookup is needed');
+  assert.deepEqual(await checkUpdate(f.gh,f.state,f.source),{commit:latest});
 });
-test('automatic update authorization binds trusted triggers, repository, branch and checked notice SHA',async()=>{
+test('automatic update authorization binds trusted triggers, repository, branch and checked source SHA',async()=>{
   let f=fixture();const event={repository:{full_name:'a/b'}};
   assert.equal((await authorizeAutomaticUpdate(f.gh,event,automatic(f))).commit,latest);
-  for(const overrides of [{GITHUB_EVENT_NAME:'issue_comment'},{GITHUB_REF:'refs/heads/feature'},{AI_BOT_UPDATE_AUTOMATIC:'false'},{AI_BOT_UPDATE_COMMIT:old}]){
+  for(const overrides of [{GITHUB_EVENT_NAME:'issue_comment'},{GITHUB_REF:'refs/heads/feature'},{AI_BOT_UPDATE_AUTOMATIC:'false'},{AI_BOT_UPDATE_COMMIT:'not-a-sha'}]){
     f=fixture();await assert.rejects(authorizeAutomaticUpdate(f.gh,event,{...automatic(f),...overrides}));
     assert.ok(!f.gh.calls.some(c=>c.method!=='GET'));
   }
-  f=fixture({closed:true});await assert.rejects(authorizeAutomaticUpdate(f.gh,event,automatic(f)));
+  f=fixture();await assert.rejects(authorizeAutomaticUpdate(f.gh,{repository:{full_name:'other/repo'}},automatic(f)));
   f=fixture({role:'read'});await assert.rejects(authorizeAutomaticUpdate(f.gh,event,automatic(f,'workflow_dispatch')));
 });
-test('a scheduled update creates the PR and Issue link without any user comment',async()=>{
+test('a scheduled update creates a direct PR without any Issue or comment',async()=>{
   const f=fixture();await applyUpdate(f.gh,f.gh,{repository:{full_name:'a/b'}},automatic(f),f.state,f.source);
   assert.ok(f.gh.calls.some(c=>c.method==='POST'&&c.p.endsWith('/pulls')));
-  assert.ok(f.gh.calls.some(c=>c.p.endsWith('/issues/9/comments')&&c.body?.body.includes('/pull/15')));
+  const pr=f.gh.calls.find(c=>c.method==='POST'&&c.p.endsWith('/pulls'));
+  assert.match(pr.body.head,/^ai-update\/bot-/);assert.ok(!pr.body.body.includes('Refs #'));
+  assert.ok(!f.gh.calls.some(c=>c.p.includes('/issues')));
   assert.ok(!f.gh.calls.some(c=>c.p.endsWith('/issues/comments/123')));
   assert.ok(!f.gh.calls.some(c=>c.p.endsWith('/merge')));
 });
@@ -159,7 +155,7 @@ test('automatic retries reuse open PRs and respect closed PRs without needing wr
     await applyUpdate(f.gh,null,{repository:{full_name:'a/b'}},automatic(f),f.state,f.source);
     assert.ok(!f.gh.calls.some(c=>c.p.includes('/git/')));
     assert.ok(!f.gh.calls.some(c=>c.method==='POST'&&c.p.endsWith('/pulls')));
-    assert.ok(f.gh.calls.some(c=>c.body?.body?.includes(state==='open'?'/pull/15':'閉じられています')));
+    assert.ok(!f.gh.calls.some(c=>c.p.includes('/issues')));
   }
 });
 test('repeated automatic status reports do not post duplicate comments',async()=>{

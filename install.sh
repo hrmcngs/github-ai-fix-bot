@@ -4,19 +4,21 @@ set -euo pipefail
 
 usage() {
   cat <<'HELP'
-Usage: bash install.sh [--directory PATH] [--ref COMMIT_SHA]
+Usage: bash install.sh [--directory PATH] [--ref COMMIT_SHA] [--upgrade]
 
 Installs .github/ai-bot/ and the investigation/fix workflows.
 Default destination: root of the current Git repository.
 Default source: hrmcngs/github-ai-fix-bot main, resolved once to a commit.
-Existing config.json is preserved. Other differing files cause installation to stop.
+Existing config.json is always preserved. Differing files stop installation by default.
+--upgrade backs up replaced Bot files inside Git metadata, then installs the selected version.
 No keys are requested, and no commits, pushes or Actions runs are performed.
 HELP
 }
 fail() { printf 'Error: %s\n' "$*" >&2; exit 1; }
 
 main() {
-  local destination='' commit='' remote_ref='' root='' relative='' parent=''
+  local destination='' commit='' remote_ref='' root='' relative='' parent='' upgrade=false backup='' git_dir='' pending='' replace_count=0
+  local -a replaced=()
   local -a files=(
     .github/ai-bot/.dockerignore
     .github/ai-bot/Dockerfile
@@ -51,6 +53,7 @@ main() {
   )
   while (($#)); do
     case "$1" in
+      --upgrade) upgrade=true; shift ;;
       --directory) (($# >= 2)) || fail '--directory requires a path'; destination=$2; shift 2 ;;
       --ref) (($# >= 2)) || fail '--ref requires a commit SHA'; commit=$2; shift 2 ;;
       -h|--help) usage; return ;;
@@ -74,7 +77,7 @@ main() {
   [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || fail '--ref must be a full lowercase 40-character commit SHA'
   staging=$(mktemp -d "${TMPDIR:-/tmp}/github-ai-fix-bot-install.XXXXXXXX")
   # The script runs in a subshell, so this trap cannot affect its caller.
-  trap 'rm -rf -- "$staging"' EXIT
+  trap '[[ -z ${pending:-} ]] || rm -f -- "$pending"; rm -rf -- "$staging"' EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM
   printf 'Downloading github-ai-fix-bot at %s...\n' "$commit"
@@ -106,12 +109,42 @@ main() {
     if [[ -e "$root/$relative" ]]; then
       [[ -f "$root/$relative" ]] || fail "Not a regular file: $relative"
       [[ "$relative" == '.github/ai-bot/config.json' ]] && continue
-      cmp -s "$staging/$relative" "$root/$relative" || fail "Existing file differs: $relative. Move it aside after reviewing before reinstalling."
+      if ! cmp -s "$staging/$relative" "$root/$relative"; then
+        [[ "$upgrade" == true ]] || fail "Existing file differs: $relative. Re-run with --upgrade to back up and replace Bot files; config.json is preserved."
+        replaced+=("$relative");replace_count=$((replace_count+1))
+      fi
     fi
   done
+  if [[ "$upgrade" == true ]]; then
+    if [[ -f "$root/.github/ai-bot/installation.json" ]]; then replaced+=(.github/ai-bot/installation.json);replace_count=$((replace_count+1)); fi
+    if ((replace_count>0)); then
+      git_dir=$(git -C "$root" rev-parse --absolute-git-dir) || fail 'Could not locate Git metadata for the backup'
+      [[ "$git_dir" == /* && -d "$git_dir" && ! -L "$git_dir" ]] || fail 'Invalid Git metadata directory'
+      [[ ! -L "$git_dir/ai-bot-backups" ]] || fail 'Symlinked backup directory'
+      if [[ -e "$git_dir/ai-bot-backups" && ! -d "$git_dir/ai-bot-backups" ]]; then fail 'Invalid backup directory'; fi
+      mkdir -p "$git_dir/ai-bot-backups"
+      backup=$(mktemp -d "$git_dir/ai-bot-backups/upgrade.XXXXXXXX")
+      # Finish every backup before replacing any project file. Git metadata is never committed.
+      for relative in "${replaced[@]}"; do
+        mkdir -p "$backup/$(dirname "$relative")"
+        cp -p "$root/$relative" "$backup/$relative" || fail "Could not back up: $relative"
+        cmp -s "$root/$relative" "$backup/$relative" || fail "Backup verification failed: $relative"
+      done
+      printf 'Backup: %s\n' "$backup"
+    fi
+  fi
   for relative in "${files[@]}"; do
     if [[ -f "$root/$relative" ]]; then
-      printf 'Kept: %s\n' "$relative"
+      if [[ "$relative" == '.github/ai-bot/config.json' ]] || cmp -s "$staging/$relative" "$root/$relative"; then
+        printf 'Kept: %s\n' "$relative"
+        continue
+      fi
+      # Replace atomically instead of truncating an existing inode or following a leaf link.
+      parent="$root/$(dirname "$relative")"
+      pending=$(mktemp "$parent/.ai-bot-upgrade.XXXXXXXX")
+      cp "$staging/$relative" "$pending" && chmod 644 "$pending" && mv -f "$pending" "$root/$relative" || fail "Could not upgrade: $relative. Backup: $backup"
+      pending=''
+      printf 'Updated: %s\n' "$relative"
       continue
     fi
     parent="$root/$(dirname "$relative")"
@@ -120,8 +153,10 @@ main() {
     cmp -s "$staging/$relative" "$root/$relative" || fail "Could not install: $relative"
     printf 'Installed: %s\n' "$relative"
   done
-  if [[ ! -e "$root/.github/ai-bot/installation.json" ]]; then
-    cp -n "$staging/installation.json" "$root/.github/ai-bot/installation.json"
+  if [[ "$upgrade" == true || ! -e "$root/.github/ai-bot/installation.json" ]]; then
+    pending=$(mktemp "$root/.github/ai-bot/.installation.XXXXXXXX")
+    cp "$staging/installation.json" "$pending" && chmod 644 "$pending" && mv -f "$pending" "$root/.github/ai-bot/installation.json" || fail "Could not write installation record. Backup: $backup"
+    pending=''
   fi
   printf '\nInstalled in: %s\nSource commit: %s\n' "$root" "$commit"
   cat <<'NEXT'
@@ -132,7 +167,7 @@ Next steps:
   3. Register TOKYO_AI_API_KEY, ANTHROPIC_API_KEY or OPENAI_API_KEY in Actions Secrets.
      Never paste API keys into Issues, comments or workflow inputs.
   4. Actions > AI investigation or AI fix > Run workflow (blank number processes all).
-  5. Bot update notices checks for updates daily and asks in an Issue.
+  5. Bot update notices checks for updates daily and opens an update PR automatically.
      Optional update PRs require AI_BOT_UPDATE_TOKEN with Contents, Pull requests and Workflows write.
 
 Docs: https://github.com/hrmcngs/github-ai-fix-bot#readme
