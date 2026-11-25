@@ -6,6 +6,7 @@ import {join} from 'node:path';
 import {prepare,analyze,publish} from '../.github/ai-bot/src/main.js';
 import {reportFile,reportDestination} from '../.github/ai-bot/src/report-pr.js';
 import {createLinkedProposal} from '../.github/ai-bot/src/proposals.js';
+import {revisionMarker} from '../.github/ai-bot/src/proposal-state.js';
 const cfg=JSON.parse(await readFile(new URL('../.github/ai-bot/config.json',import.meta.url)));
 const sha='a'.repeat(40),blob='b'.repeat(40);
 const event={repository:{full_name:'a/b'},action:'created',issue:{number:2},comment:{id:123,body:'/ai-report-pr',user:{type:'User',login:'owner'}}};
@@ -54,7 +55,7 @@ test('report command prepares in manual mode and publishes exactly one Markdown 
   assert.ok(!writes.some(c=>c.path.endsWith('/merge')));
 }));
 test('existing report PR skips AI and repairs the missing reply without creating another PR',()=>fixture(async({env})=>{
-  const existing={number:9,user:bot,body:'<!-- ai-report:issue:2 -->',head:{repo:{full_name:'a/b'}},base:{repo:{full_name:'a/b'}}};
+  const existing={number:9,user:bot,body:`<!-- ai-report:issue:2 -->\n${revisionMarker({title:'調査して',body:'package.jsonの検証内容を文章で整理して'})}`,head:{ref:'ai-report/issue-2-0123456789ab-123',repo:{full_name:'a/b'}},base:{repo:{full_name:'a/b'}}};
   const gh=github({prs:[existing]});await prepare(env,gh);
   await analyze(env);const result=JSON.parse(await readFile('.work/result.json'));assert.equal(result.results[0].ok,true);
   await publish(env,gh);
@@ -88,3 +89,15 @@ test('notification failure keeps the created PR available for retry instead of d
   await assert.rejects(createLinkedProposal(gh,{kind:'report',issue:2,runId:123,sha,id:'d'.repeat(64),base:'main',title:'report',body:'report',files:[{path:'reports/ai/issue-2.md',content:'# report'}],notify:async()=>{throw new Error('mock notification failure');}}),e=>e.code==='NOTIFY'&&e.proposalNumber===9);
   assert.ok(gh.calls.some(c=>c.method==='POST'&&c.path.endsWith('/pulls')));assert.ok(!gh.calls.some(c=>c.method==='DELETE'));
 });
+test('report created for an updated Issue references the previous report without reusing it',()=>fixture(async({env})=>{
+  const old={number:8,user:bot,body:`<!-- ai-report:issue:2 -->\n${revisionMarker({title:'Old',body:'Old'})}`,head:{ref:'ai-report/issue-2-0123456789ab-123',repo:{full_name:'a/b'}},base:{repo:{full_name:'a/b'}}};
+  const gh=github({prs:[old]}),list=gh.list;
+  gh.list=async path=>path.endsWith('/pulls/8/files')?[{filename:'reports/ai/issue-2.md',patch:'-old\n+report'}]:list(path);
+  await prepared(env,gh);
+  const bundle=JSON.parse(await readFile('.work/bundle.json'));
+  assert.equal(bundle.existingReportPR,undefined);assert.equal(bundle.context.previousProposals[0].number,8);
+  await publish(env,gh);
+  const pr=gh.calls.find(c=>c.method==='POST'&&c.path.endsWith('/pulls'));
+  assert.match(pr.body.body,/ai-issue-revision:[a-f0-9]{64}/);
+  assert.ok(pr.body.body.includes('https://github.com/a/b/pull/8'));
+}));

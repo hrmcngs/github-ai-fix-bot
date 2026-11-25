@@ -7,6 +7,7 @@ import {pathToFileURL} from 'node:url';
 import {config,number,SafeError} from './core.js';
 import {GitHub,botOwned} from './github.js';
 import {editable} from './fix-core.js';
+import {sameRevision} from './proposal-state.js';
 const exec=promisify(execFile);
 export function mergeConfig(cfg){
   const settings=cfg.autoMerge??{enabled:false,label:'ai-auto-merge',method:'squash',requiredChecks:['test']};
@@ -90,6 +91,8 @@ export async function considerMerge(gh,n,cfg,{getProtection=protection,enable=en
   const pr=await gh.request(gh.path(`/pulls/${number(n)}`));
   const proposal=botProposal(pr,gh.repo,settings.label);
   if(!proposal||pr.base.ref!==repo.default_branch)return wait('対象のラベル付きBot PRではありません。');
+  const currentIssue=await gh.request(gh.path(`/issues/${proposal.issue}`));
+  if(currentIssue.state!=='open'||!sameRevision(pr,currentIssue))return wait('Issueが更新された旧版のPR、または版情報がないPRです。');
   if(pr.mergeable!==true||pr.mergeable_state!=='clean')return wait('競合、未完了の条件、またはマージ状態の確認待ちです。');
   if(!repo[settings.method==='merge'?'allow_merge_commit':`allow_${settings.method}_merge`])return wait('選択したマージ方法は許可されていません。');
   const state=await getProtection(gh,n);
@@ -101,6 +104,7 @@ export async function considerMerge(gh,n,cfg,{getProtection=protection,enable=en
   if(!await checks(gh,pr,settings.requiredChecks,'.github/workflows/check.yml'))return wait('最新コミットの信頼したCIがすべて成功していません。');
   const fresh=await gh.request(gh.path(`/pulls/${number(n)}`));
   if(fresh.head.sha!==pr.head.sha||fresh.base.sha!==pr.base.sha||!botProposal(fresh,gh.repo,settings.label))return wait('確認中にPRが更新されました。');
+  if(!sameRevision(fresh,await gh.request(gh.path(`/issues/${proposal.issue}`))))return wait('確認中にIssueが更新されました。');
   await enable(gh,fresh,settings.method);
   return{merged:true,reason:'人間の承認と必須CIを確認し、GitHubの保護ルールに従う自動マージを要求しました。'};
 }
