@@ -9,7 +9,7 @@ async function json(path, max = 1000000) {
   return JSON.parse(await readFile(path, 'utf8'));
 }
 async function save(path, value) { await mkdir('.work', { recursive: true }); await writeFile(path, JSON.stringify(value), { mode: 0o600 }); }
-function issueTarget(issue) {
+export function issueTarget(issue) {
   if (issue.pull_request || issue.state !== 'open') throw new SafeError('ACCESS');
   return { kind: 'issue', number: number(issue.number), title: String(issue.title).slice(0,1000), body: scrub(String(issue.body || '')).slice(0,18000) };
 }

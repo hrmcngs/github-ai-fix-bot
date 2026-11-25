@@ -36,3 +36,17 @@ jobs:
         env:
           PROVIDER: ${{ matrix.provider }}
         run: docker run --rm --network=none --cap-drop=ALL --security-opt=no-new-privileges --entrypoint "$PROVIDER" ai-bot-smoke --version
+  fix-validation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Build the secretless offline validator
+        run: docker build -f .github/ai-bot/Dockerfile.verify -t ai-bot-verify:local .github/ai-bot
+      - name: Test real validation and isolation with local fixtures
+        run: node scripts/smoke-fix-validation.mjs
