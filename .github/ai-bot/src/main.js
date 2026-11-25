@@ -132,6 +132,17 @@ export async function publish(env = process.env, ghArg) {
   if (bundle.repo !== gh.repo || result.results?.length !== bundle.targets?.length || bundle.targets.length > 3) throw new SafeError('OUTPUT');
   const cfg = config(bundle.cfg);
   if(bundle.reportPR)return publishReport({env,gh,bundle,result,event,issueTarget});
+  if(event.repository?.full_name!==gh.repo||!['workflow_dispatch','issues','schedule','issue_comment'].includes(env.GITHUB_EVENT_NAME))throw new SafeError('ACCESS');
+  const repo=await gh.request(gh.path());
+  if(repo.private&&env.ALLOW_PRIVATE_REPOSITORY!=='true')throw new SafeError('PRIVATE');
+  if(env.GITHUB_REF!==`refs/heads/${repo.default_branch}`)throw new SafeError('ACCESS');
+  if(env.GITHUB_EVENT_NAME==='schedule'){
+    if(cfg.mode!=='automatic')throw new SafeError('ACCESS');
+  }else{
+    const role=await gh.request(gh.path(`/collaborators/${encodeURIComponent(env.GITHUB_ACTOR)}/permission`));
+    if(!['admin','maintain','write'].includes(role.permission))throw new SafeError('ACCESS');
+  }
+  const ref=await gh.request(gh.path(`/git/ref/heads/${encodeURIComponent(repo.default_branch)}`));
   let report;
   for (const [i,target] of bundle.targets.entries()) {
     if (!['issue','dependabot'].includes(target.kind)) throw new SafeError('OUTPUT');
@@ -143,9 +154,11 @@ export async function publish(env = process.env, ghArg) {
     if (env.GITHUB_EVENT_NAME === 'issue_comment') {
       if (target.kind !== 'issue' || number(event.issue?.number) !== n) throw new SafeError('ACCESS');
       await requireCommand(gh,event,env,'/ai-investigate');
-      const permission = await gh.request(gh.path(`/collaborators/${encodeURIComponent(env.GITHUB_ACTOR)}/permission`));
-      if (!['admin','maintain','write'].includes(permission.permission)) throw new SafeError('ACCESS');
     }
+    const live=await gh.request(gh.path(target.kind==='issue'?`/issues/${n}`:`/dependabot/alerts/${n}`));
+    const current=target.kind==='issue'?issueTarget(live):alertTarget(live);
+    if(ref.object?.sha!==target.sha||fingerprint(current,target.sha,cfg)!==target.fingerprint)throw new SafeError('STALE');
+    if(env.GITHUB_EVENT_NAME==='issues'&&(cfg.mode!=='automatic'||event.action!=='labeled'||event.label?.name!==cfg.issueLabel||!live.labels?.some(label=>label.name===cfg.issueLabel)))throw new SafeError('ACCESS');
     if (result.results[i].provider !== cfg.provider) throw new SafeError('OUTPUT');
     const body = comment(result.results[i],target,`https://github.com/${gh.repo}/actions/runs/${env.GITHUB_RUN_ID}`);
     let issueNumber = n;

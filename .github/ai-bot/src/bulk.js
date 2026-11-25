@@ -13,14 +13,14 @@ export function workerEvent(env,event){
 export async function selectTargets(gh,event,env,cfg,mode){
   if(!['fix','investigate'].includes(mode))throw new SafeError('CONFIG');
   if(event.repository?.full_name!==gh.repo)throw new SafeError('ACCESS');
+  const trigger=env.GITHUB_EVENT_NAME;
+  if(trigger==='issue_comment'&&!isCommand(event,env,mode==='fix'?'/ai-fix':'/ai-investigate')
+    &&!(mode==='investigate'&&isCommand(event,env,'/ai-report-pr')))return [];
   const repo=await gh.request(gh.path());
   if(env.GITHUB_REF!==`refs/heads/${repo.default_branch}`)throw new SafeError('ACCESS');
   if(repo.private&&env.ALLOW_PRIVATE_REPOSITORY!=='true')throw new SafeError('PRIVATE');
-  const trigger=env.GITHUB_EVENT_NAME;
   if(!['workflow_dispatch','issue_comment','issues','schedule'].includes(trigger))throw new SafeError('ACCESS');
   if(trigger!=='schedule'){
-    if(trigger==='issue_comment'&&!isCommand(event,env,mode==='fix'?'/ai-fix':'/ai-investigate')
-      &&!(mode==='investigate'&&isCommand(event,env,'/ai-report-pr')))return [];
     const role=await gh.request(gh.path(`/collaborators/${encodeURIComponent(env.GITHUB_ACTOR)}/permission`));
     if(!['write','maintain','admin'].includes(role.permission))throw new SafeError('ACCESS');
   }

@@ -148,3 +148,25 @@ test('matrix worker routing uses the selected target rather than the blank paren
   await prepareFix(worker,github('/unused'));
   bundle=JSON.parse(await readFile('.work/fix-bundle.json'));assert.equal(bundle.targets[0].number,2);assert.equal(bundle.cfg.referencePreviousPRs,false);
 }));
+test('ordinary investigation publication rechecks dispatch authority, consent and current source before writing',()=>fixture(async({env})=>{
+  const dispatch={...env,GITHUB_EVENT_NAME:'workflow_dispatch'};
+  await writeFile('event.json',JSON.stringify({repository:{full_name:'a/b'},inputs:{target:'issue',number:'2'}}));
+  await prepare(dispatch,github('/unused'));
+  await writeFile('.work/result.json',JSON.stringify({results:[{ok:true,provider:cfg.provider,text:'Safe investigation'}]}));
+  const allowed=github('/unused');await publish(dispatch,allowed);
+  assert.equal(allowed.calls.filter(call=>call.method!=='GET').length,1);
+  for(const [kind,code]of [['role','ACCESS'],['issue','STALE'],['base','STALE'],['private','PRIVATE']]){
+    const denied=github('/unused'),request=denied.request;
+    denied.request=async(path,method='GET',payload)=>{
+      if(method==='GET'){
+        if(kind==='role'&&path.includes('/permission'))return{permission:'read'};
+        if(kind==='private'&&path==='/repos/a/b')return{private:true,default_branch:'main'};
+        if(kind==='issue'&&path.endsWith('/issues/2'))return{number:2,state:'open',title:'Updated',body:'New requirement'};
+        if(kind==='base'&&path.includes('/git/ref/'))return{object:{sha:'f'.repeat(40)}};
+      }
+      return request(path,method,payload);
+    };
+    await assert.rejects(publish(dispatch,denied),error=>error.code===code,kind);
+    assert.ok(!denied.calls.some(call=>call.method!=='GET'),kind);
+  }
+}));

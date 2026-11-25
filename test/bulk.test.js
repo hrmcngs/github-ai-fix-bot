@@ -51,3 +51,20 @@ test('reusable workers isolate artifact names between target jobs and keep keys 
   const validation=fix.slice(fix.indexOf('  validate:'),fix.indexOf('  publish:'));
   assert.ok(!validation.includes('secrets.'));assert.ok(validation.includes('offline'));
 });
+test('unrelated comments return without requesting repository metadata or permissions',async()=>{
+  for(const mode of ['fix','investigate']){
+    const gh={repo:'a/b',request:async()=>assert.fail('No API work for unrelated text')};
+    const comment={...event,action:'created',issue:{number:1},comment:{body:'normal conversation',user:{type:'User',login:'owner'}}};
+    assert.deepEqual(await selectTargets(gh,comment,{...env,GITHUB_EVENT_NAME:'issue_comment'},cfg,mode),[]);
+  }
+});
+test('shared scheduling admission belongs to authorized jobs rather than untrusted workflow events',async()=>{
+  for(const name of ['fix','investigate','bot-updates','auto-merge','proposal-updates']){
+    const text=await readFile(new URL(`../.github/workflows/${name}.yml`,import.meta.url),'utf8');
+    assert.ok(!/^concurrency:/m.test(text),name);
+    if(['fix','investigate'].includes(name)){
+      assert.ok(text.includes('needs.select.outputs.ready'));assert.ok(text.includes('matrix.number'));
+      assert.ok(text.includes('    concurrency:'));
+    }
+  }
+});

@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
-import {readFile} from 'node:fs/promises';
-import {SOURCE,STATE,MANIFEST,UPDATE_MARKER,manifest,installation,Upstream,release,checkUpdate,authorizeUpdate,updateFiles,applyUpdate} from '../.github/ai-bot/src/updates.js';
+import {readFile,mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {SOURCE,STATE,MANIFEST,UPDATE_MARKER,manifest,installation,Upstream,release,checkUpdate,authorizeUpdate,updateFiles,applyUpdate,loadInstallation} from '../.github/ai-bot/src/updates.js';
 const old='a'.repeat(40),latest='b'.repeat(40),base='c'.repeat(40);
 const file='.github/ai-bot/src/main.js';
 const gitHash=content=>createHash('sha1').update(`blob ${Buffer.byteLength(content)}\0`).update(content).digest('hex');
@@ -93,4 +95,33 @@ test('removed upstream files produce deletions only on the dedicated update bran
   const tree=f.gh.calls.find(c=>c.method==='POST'&&c.p.endsWith('/git/trees'));
   assert.equal(tree.body.tree.find(entry=>entry.path===obsolete).sha,null);
   assert.ok(!f.gh.calls.some(c=>c.method==='PATCH'&&c.p.includes('/git/refs')));
+});
+test('identical unowned workflows are not silently adopted into the update baseline',async()=>{
+  const f=fixture(),releaseData=await release(f.source),path='.github/workflows/fix.yml';
+  delete f.state.files[path];f.tree.find(entry=>entry.path===path).sha=releaseData.files[path];
+  await assert.rejects(updateFiles(f.gh,f.state,releaseData,f.source,base),e=>e.code==='UPDATE_CONFLICT');
+});
+test('an already-managed file manually brought to the approved version remains acceptable',async()=>{
+  const f=fixture(),releaseData=await release(f.source);
+  f.tree.find(entry=>entry.path===file).sha=releaseData.files[file];
+  const changes=await updateFiles(f.gh,f.state,releaseData,f.source,base);
+  assert.ok(!changes.some(entry=>entry.path===file));assert.ok(changes.some(entry=>entry.path===STATE));
+});
+
+test('missing or malformed installation records reply safely to an authorized update request',async()=>{
+  const dir=await mkdtemp(join(tmpdir(),'ai-update-state-')),original=process.cwd();
+  await mkdir(join(dir,'.github/ai-bot'),{recursive:true});process.chdir(dir);
+  try{
+    for(const content of [null,'not json','{}']){
+      if(content!==null)await writeFile(STATE,content);
+      const f=fixture();await assert.rejects(loadInstallation(f.gh,f.event,f.env,'apply'),e=>e.code==='UPDATE_STATE');
+      const writes=f.gh.calls.filter(call=>call.method!=='GET');
+      assert.equal(writes.length,1);assert.ok(writes[0].p.endsWith('/issues/9/comments'));
+      assert.ok(writes[0].body.body.includes('導入記録'));assert.ok(!writes[0].body.body.includes('not json'));
+    }
+    const denied=fixture({role:'read'});await assert.rejects(loadInstallation(denied.gh,denied.event,denied.env,'apply'),e=>e.code==='ACCESS');
+    assert.ok(!denied.gh.calls.some(call=>call.method!=='GET'));
+    const f=fixture();await writeFile(STATE,JSON.stringify(f.state));
+    assert.deepEqual(await loadInstallation(f.gh,f.event,f.env,'apply'),f.state);
+  }finally{process.chdir(original);await rm(dir,{recursive:true,force:true});}
 });

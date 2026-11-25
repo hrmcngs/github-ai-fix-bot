@@ -106,6 +106,7 @@ export async function updateFiles(gh,state,latest,source,baseSha){
     }
     const current=tree.get(path),installed=state.files[path],next=latest.files[path];
     if(current&&(current.type!=='blob'||current.mode!=='100644'))throw new SafeError('UPDATE_CONFLICT');
+    if(!installed&&current)throw new SafeError('UPDATE_CONFLICT');
     if(current?.sha===next&&next)continue;
     if((installed&&current?.sha!==installed)||(!installed&&current))throw new SafeError('UPDATE_CONFLICT');
     if(!next){if(current)changes.push({path,sha:null});continue;}
@@ -134,6 +135,18 @@ export async function applyUpdate(gh,writer,event,env,state,source=new Upstream(
   const id=createHash('sha256').update(auth.commit).digest('hex');
   await createLinkedProposal(writer,{kind:'update',issue:auth.number,runId:env.GITHUB_RUN_ID,sha:base,id,base:auth.branch,title:'chore: update GitHub AI Bot',body:`${marker}\nRefs #${auth.number}\n\n[配布元の変更](https://github.com/${SOURCE}/compare/${state.commit}...${auth.commit})\n\nBot専用ファイルを更新します。設定とAPIキーは保持します。取得ファイルのGit blobハッシュと導入済みファイルの一致を検査しました。上流コード・コマンド・インストーラーは実行していません。更新PRの差分とCIを人間がレビューしてください。自動マージは行いません。`,files,notify:pr=>notify(`更新PRを ${proposalLink(gh,pr.number)} に作成しました。差分とCIを確認してからマージしてください。`)});
 }
+export async function loadInstallation(gh,event,env,action){
+  const auth=action==='apply'?await authorizeUpdate(gh,event,env):null;
+  if(action==='apply'&&!auth)throw new SafeError('ACCESS');
+  try{return installation(JSON.parse(await readFile(STATE,'utf8')));}catch{
+    const text='導入記録がないか破損しています。新しいインストーラーで導入・移行し、差分を確認してから再実行してください。自動上書きはしていません。';
+    if(auth){
+      await gh.request(gh.path(`/issues/${auth.number}/comments`),'POST',{body:text});
+      throw new SafeError('UPDATE_STATE');
+    }
+    console.log(text);return null;
+  }
+}
 export async function updates(env=process.env){
   const gh=new GitHub(env.GITHUB_REPOSITORY,env.GH_TOKEN);
   const event=JSON.parse(await readFile(env.GITHUB_EVENT_PATH,'utf8'));
@@ -145,8 +158,7 @@ export async function updates(env=process.env){
     if(await authorizeUpdate(gh,event,env))if(env.GITHUB_OUTPUT)await appendFile(env.GITHUB_OUTPUT,'ready=true\n');
     return;
   }
-  let state;
-  try{state=installation(JSON.parse(await readFile(STATE,'utf8')));}catch{console.log('導入元の記録がありません。新しいインストーラーで導入・移行してください。');return;}
+  const state=await loadInstallation(gh,event,env,action);if(!state)return;
   if(action==='check'){
     if(!['schedule','workflow_dispatch'].includes(env.GITHUB_EVENT_NAME))throw new SafeError('ACCESS');
     await checkUpdate(gh,state);

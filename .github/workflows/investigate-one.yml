@@ -117,6 +117,7 @@ jobs:
     permissions:
       contents: read
       issues: write
+      vulnerability-alerts: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -137,6 +138,7 @@ jobs:
         run: node .github/ai-bot/src/main.js publish
         env:
           GH_TOKEN: ${{ github.token }}
+          ALLOW_PRIVATE_REPOSITORY: ${{ vars.AI_BOT_ALLOW_PRIVATE }}
 
   publish-report:
     needs: [prepare, analyze]
