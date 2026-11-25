@@ -4,20 +4,49 @@ set -euo pipefail
 
 usage() {
   cat <<'HELP'
-Usage: bash install.sh [--directory PATH] [--ref COMMIT_SHA] [--upgrade]
+Usage: bash install.sh [--directory PATH] [--ref COMMIT_SHA] [--upgrade] [--skip-security-updates]
 
 Installs .github/ai-bot/ and the investigation/fix workflows.
 Default destination: root of the current Git repository.
 Default source: hrmcngs/github-ai-fix-bot main, resolved once to a commit.
 Existing config.json is always preserved. Differing files stop installation by default.
 --upgrade backs up replaced Bot files inside Git metadata, then installs the selected version.
+Enables Dependabot alerts/security update PRs using an authenticated GitHub CLI admin session.
+--skip-security-updates leaves repository security settings unchanged.
 No keys are requested, and no commits, pushes or Actions runs are performed.
 HELP
 }
 fail() { printf 'Error: %s\n' "$*" >&2; exit 1; }
 
+enable_security_updates() {
+  local root=$1 origin='' repo=''
+  origin=$(git -C "$root" remote get-url origin 2>/dev/null) || origin=''
+  case "$origin" in
+    https://github.com/*) repo=${origin#https://github.com/} ;;
+    git@github.com:*) repo=${origin#git@github.com:} ;;
+    ssh://git@github.com/*) repo=${origin#ssh://git@github.com/} ;;
+  esac
+  repo=${repo%.git}
+  if [[ ! "$repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+    printf '\nDependabot: not configured (origin must identify a github.com repository).\n'
+    return
+  fi
+  if command -v gh >/dev/null 2>&1 &&
+    [[ $(gh api --hostname github.com "repos/$repo" --jq '.permissions.admin' 2>/dev/null) == true ]] &&
+    gh api --hostname github.com --method PUT "repos/$repo/vulnerability-alerts" >/dev/null 2>&1 &&
+    gh api --hostname github.com --method PUT "repos/$repo/automated-security-fixes" >/dev/null 2>&1; then
+    printf '\nDependabot security update PRs enabled for %s.\n' "$repo"
+    printf 'GitHub opens PRs when a supported vulnerable dependency has an available fix; review CI before merging.\n'
+  else
+    printf '\nDependabot setup incomplete: GitHub CLI login and repository admin access are required.\n'
+    printf 'Enable Dependency graph, Dependabot alerts and Dependabot security updates here:\n'
+    printf 'https://github.com/%s/settings/security_analysis\n' "$repo"
+    printf 'Bot files were installed successfully; no auto-merge was enabled.\n'
+  fi
+}
+
 main() {
-  local destination='' commit='' remote_ref='' root='' relative='' parent='' upgrade=false backup='' git_dir='' pending='' replace_count=0
+  local destination='' commit='' remote_ref='' root='' relative='' parent='' upgrade=false security_updates=true backup='' git_dir='' pending='' replace_count=0
   local -a replaced=()
   local -a files=(
     .github/ai-bot/.dockerignore
@@ -54,6 +83,7 @@ main() {
   while (($#)); do
     case "$1" in
       --upgrade) upgrade=true; shift ;;
+      --skip-security-updates) security_updates=false; shift ;;
       --directory) (($# >= 2)) || fail '--directory requires a path'; destination=$2; shift 2 ;;
       --ref) (($# >= 2)) || fail '--ref requires a commit SHA'; commit=$2; shift 2 ;;
       -h|--help) usage; return ;;
@@ -158,6 +188,7 @@ main() {
     cp "$staging/installation.json" "$pending" && chmod 644 "$pending" && mv -f "$pending" "$root/.github/ai-bot/installation.json" || fail "Could not write installation record. Backup: $backup"
     pending=''
   fi
+  if [[ "$security_updates" == true ]]; then enable_security_updates "$root"; fi
   printf '\nInstalled in: %s\nSource commit: %s\n' "$root" "$commit"
   cat <<'NEXT'
 

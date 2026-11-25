@@ -17,7 +17,8 @@ const fs=require('node:fs'),crypto=require('node:crypto'),path=require('node:pat
 if(args[0]==='hash-object'){
   const bytes=fs.readFileSync(args.at(-1));
   process.stdout.write(crypto.createHash('sha1').update('blob '+bytes.length+'\\0').update(bytes).digest('hex')+'\\n');
-}else if(args[0]==='-C')process.stdout.write((args.includes('--absolute-git-dir')?path.join(process.env.FIXTURE_ROOT,'.git'):process.env.FIXTURE_ROOT)+'\\n');
+}else if(args.includes('get-url'))process.stdout.write((process.env.FIXTURE_ORIGIN||'')+'\\n');
+else if(args[0]==='-C')process.stdout.write((args.includes('--absolute-git-dir')?path.join(process.env.FIXTURE_ROOT,'.git'):process.env.FIXTURE_ROOT)+'\\n');
 else process.stdout.write('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\trefs/heads/main\\n');
 `,{mode:0o755});
   await writeFile(join(bin,'curl'),`#!${process.execPath}
@@ -30,6 +31,12 @@ const output=args[args.indexOf('--output')+1];
 fs.copyFileSync(path.join(process.env.FIXTURE_SOURCE,relative),output);
 // HTTP downloads create writable files even when the fixture source is mounted readonly.
 fs.chmodSync(output,0o644);
+`,{mode:0o755});
+  await writeFile(join(bin,'gh'),`#!${process.execPath}
+const fs=require('node:fs'),args=process.argv.slice(2);
+fs.appendFileSync(process.env.TMPDIR+'/gh-calls.jsonl',JSON.stringify(args)+'\\n');
+if(args.includes('--jq')){process.stdout.write(process.env.FIXTURE_ADMIN||'false');process.exit(0);}
+if(args.at(-1).endsWith('/automated-security-fixes')&&process.env.FAIL_SECURITY==='true')process.exit(1);
 `,{mode:0o755});
   const run=(extra={},args=[])=>spawnSync('bash',['-s','--','--directory',root,...args],{input:script,encoding:'utf8',cwd:dir,env:{PATH:`${bin}:/usr/bin:/bin`,HOME:join(dir,'home'),TMPDIR:dir,FIXTURE_ROOT:root,FIXTURE_SOURCE:source,...extra}});
   try{await fn({root,dir,run});}finally{await rm(dir,{recursive:true,force:true});}
@@ -100,4 +107,36 @@ test('failed upgrade downloads and symlinked backups do not alter existing Bot f
   const external=join(dir,'external-backups');await mkdir(external);await symlink(external,join(root,'.git/ai-bot-backups'));
   result=run({},['--upgrade']);assert.notEqual(result.status,0);assert.match(result.stderr,/Symlinked backup/);
   assert.equal(await readFile(join(root,'.github/ai-bot/src/core.js'),'utf8'),'keep old bot');
+}));
+
+test('installation enables native security PRs only for the authenticated origin admin',()=>fixture(async({root,dir,run})=>{
+  const result=run({FIXTURE_ORIGIN:'git@github.com:owner/project.git',FIXTURE_ADMIN:'true'});
+  assert.equal(result.status,0,result.stderr);
+  assert.match(result.stdout,/Dependabot security update PRs enabled for owner\/project/);
+  const calls=(await readFile(join(dir,'gh-calls.jsonl'),'utf8')).trim().split('\n').map(JSON.parse);
+  assert.equal(calls.length,3);
+  assert.deepEqual(calls[1],['api','--hostname','github.com','--method','PUT','repos/owner/project/vulnerability-alerts']);
+  assert.deepEqual(calls[2],['api','--hostname','github.com','--method','PUT','repos/owner/project/automated-security-fixes']);
+  assert.ok(await readFile(join(root,'.github/ai-bot/installation.json'),'utf8'));
+}));
+test('non-admin setup performs no writes and explains how to finish configuration',()=>fixture(async({dir,run})=>{
+  const result=run({FIXTURE_ORIGIN:'https://github.com/owner/project.git'});
+  assert.equal(result.status,0,result.stderr);
+  assert.match(result.stdout,/setup incomplete/);
+  assert.match(result.stdout,/https:\/\/github.com\/owner\/project\/settings\/security_analysis/);
+  const calls=(await readFile(join(dir,'gh-calls.jsonl'),'utf8')).trim().split('\n').map(JSON.parse);
+  assert.equal(calls.length,1);assert.ok(!calls[0].includes('PUT'));
+}));
+test('failed security configuration preserves installation and does not claim success',()=>fixture(async({root,run})=>{
+  const result=run({FIXTURE_ORIGIN:'ssh://git@github.com/owner/project.git',FIXTURE_ADMIN:'true',FAIL_SECURITY:'true'});
+  assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/setup incomplete/);
+  assert.doesNotMatch(result.stdout,/PRs enabled/);
+  assert.ok(await readFile(join(root,'.github/ai-bot/installation.json'),'utf8'));
+}));
+test('security setup can be skipped and never contacts other hosts',()=>fixture(async({dir,run})=>{
+  assert.equal(run({FIXTURE_ORIGIN:'https://github.com/owner/project.git',FIXTURE_ADMIN:'true'},['--skip-security-updates']).status,0);
+  await assert.rejects(access(join(dir,'gh-calls.jsonl')));
+  const result=run({FIXTURE_ORIGIN:'https://example.com/owner/project.git',FIXTURE_ADMIN:'true'});
+  assert.equal(result.status,0);assert.match(result.stdout,/origin must identify/);
+  await assert.rejects(access(join(dir,'gh-calls.jsonl')));
 }));

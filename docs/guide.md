@@ -44,6 +44,16 @@ APIキーの入力、依存パッケージのインストール、コミット�
 
 このリポジトリ自体で試す場合も、同じ手順でSecretの登録が必要です。利用者のキーを他人が管理する共通リポジトリに集約しないでください。forkではActionsや定期実行の有効化を確認してください。
 
+## Dependabotによるセキュリティ修正PR
+
+インストーラーはGitHub CLIのログイン情報を使い、originのgithub.comリポジトリで管理者権限を確認してからDependabot alertsとsecurity updatesを有効にします。追加のAIキーやActions用の管理者トークンは不要です。`--skip-security-updates` で設定変更を省略できます。
+
+`gh`未導入・未ログイン・権限不足・組織ポリシーなどで設定できない場合もBotファイルの導入は完了し、設定画面のURLを表示します。Dependency graph、Dependabot alerts、Dependabot security updatesをその画面で確認してください。alertsだけ有効になり、security updatesの有効化に失敗する場合もあります。
+
+PRはGitHubのDependabotが作成します。全依存関係の最新版への更新ではなく、対応エコシステムで修正版が利用可能な脆弱性が対象です。即時のPR作成や全アラートの修正を保証しません。既存のDependabot設定を上書きせず、自動マージやレビュー承認も有効にしません。
+
+[GitHub公式：Dependabot security updatesの設定](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/secure-your-dependencies/configure-security-updates)
+
 ## AIを選ぶ
 
 | `provider` | 実行方式 | Repository Secret |
