@@ -75,6 +75,7 @@ test('existing open bot PR suppresses a new AI proposal',()=>fixture(async({env}
   await prepareFix(env,gh);await assert.rejects(access('.work/fix-bundle.json'));
 }));
 test('generation accepts bounded JSON and masks failures without leaking provider errors',()=>fixture(async({env})=>{
+  env.AI_API_KEY='fixture-only-key';
   await artifacts();await generateFix(env,{tokyo:async()=>JSON.stringify(plan())});
   assert.deepEqual(JSON.parse(await readFile('.work/fix-plan.json')).plan,plan());
   await generateFix(env,{tokyo:async()=>{throw new Error('dummy-api-key must never be published');}});

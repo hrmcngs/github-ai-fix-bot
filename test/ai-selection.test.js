@@ -31,7 +31,7 @@ test('all generates independent drafts then synthesizes with the preferred provi
   assert.deepEqual(calls.map(c=>c.p),['tokyo','codex','tokyo']);
   assert.equal(calls[0].key,keys.TOKYO_AI_API_KEY);assert.equal(calls[1].key,keys.OPENAI_API_KEY);
   assert.ok(calls[2].input.includes('Codex draft'));assert.ok(!calls[2].input.includes(keys.OPENAI_API_KEY));
-  assert.ok(aiIdentity(all).includes('codex'));assert.ok(aiIdentity(all).includes('統合担当'));
+  assert.ok(aiIdentity(all).includes('Codex'));assert.ok(aiIdentity(all).includes('統合担当'));
 });
 test('single selection performs one call and failures never silently synthesize partial drafts',async()=>{
   let calls=0;

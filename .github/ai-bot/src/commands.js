@@ -2,6 +2,7 @@ import { number, SafeError } from './core.js';
 
 export function commandMatches(body,command){
   if(typeof body!=='string')return false;
+  if(/[\r\n]/.test(body.trim()))return false;
   const parts=body.trim().split(/\s+/);
   if(parts.shift()!==command)return false;
   let ai=false,reference=false;
