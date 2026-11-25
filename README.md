@@ -23,6 +23,12 @@ curl -fsSL https://raw.githubusercontent.com/hrmcngs/github-ai-fix-bot/main/inst
 
 privateリポジトリでは、AIへの送信を許可したうえでActionsのRepository Variable **`AI_BOT_ALLOW_PRIVATE=true`** を追加します。Issue本文と許可したソースの一部をAIに送信します。
 
+## セキュリティ修正PR
+
+導入時、`gh` がログイン済みで導入先の管理者権限があれば、Dependabot alertsとsecurity updatesを有効にします。以後、修正可能な脆弱性が見つかるとDependabotがPRを自動作成します。AIキーは不要です。CIと差分を確認してマージしてください。
+
+設定できなかった場合は導入ログの設定画面を開き、Dependency graph・Dependabot alerts・Dependabot security updatesを有効にします。設定を変更したくない場合はインストール時に `--skip-security-updates` を指定します。
+
 ## 使い方
 
 write権限以上の利用者がIssueへ新しいコメントを投稿します。
