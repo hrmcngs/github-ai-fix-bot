@@ -160,7 +160,7 @@ export async function publish(env = process.env, ghArg) {
     if(ref.object?.sha!==target.sha||fingerprint(current,target.sha,cfg)!==target.fingerprint)throw new SafeError('STALE');
     if(env.GITHUB_EVENT_NAME==='issues'&&(cfg.mode!=='automatic'||event.action!=='labeled'||event.label?.name!==cfg.issueLabel||!live.labels?.some(label=>label.name===cfg.issueLabel)))throw new SafeError('ACCESS');
     if (result.results[i].provider !== cfg.provider) throw new SafeError('OUTPUT');
-    const body = comment(result.results[i],target,`https://github.com/${gh.repo}/actions/runs/${env.GITHUB_RUN_ID}`);
+    const body = comment(result.results[i],target,`https://github.com/${gh.repo}/actions/runs/${env.GITHUB_RUN_ID}`,cfg);
     let issueNumber = n;
     if (target.kind === 'dependabot') {
       report ||= await reportIssue(gh);

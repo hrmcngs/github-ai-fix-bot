@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile, writeFile, mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { config, allowedPath, number, scrub, fingerprint, prompt, cleanOutput, comment, SafeError } from '../.github/ai-bot/src/core.js';
+import { config, allowedPath, number, scrub, fingerprint, prompt, cleanOutput, comment, aiIdentity, SafeError } from '../.github/ai-bot/src/core.js';
 import { route, statusCode, createBroker } from '../.github/ai-bot/src/broker.js';
 import { tokyo, agent } from '../.github/ai-bot/src/providers.js';
 import { GitHub, completed } from '../.github/ai-bot/src/github.js';
@@ -224,4 +224,17 @@ test('private repository requires an explicit repository opt-in before reading s
     await assert.rejects(prepare({...env,ALLOW_PRIVATE_REPOSITORY:'true'},gh),e=>e.code==='ACCESS');
     assert.equal(subsequentReads,1);
   }finally{process.chdir(original);await rm(dir,{recursive:true,force:true});}
+});
+
+test('AI attribution uses the selected configuration and never invents a resolved model',()=>{
+  assert.match(aiIdentity({...cfg,provider:'claude'}),/Claude Code.*sonnet/);
+  assert.match(aiIdentity({...cfg,provider:'codex'}),/OpenAI Codex.*gpt-5.4/);
+  assert.match(aiIdentity({...cfg,provider:'tokyo'}),/東京都生成AI API.*未取得/);
+  assert.ok(!aiIdentity({...cfg,provider:'tokyo'}).includes('gpt-5.4'));
+  assert.throws(()=>aiIdentity({...cfg,provider:'claude',models:{claude:'<img src=x>'}}),SafeError);
+  assert.throws(()=>aiIdentity({...cfg,provider:'claude',models:{claude:'sk-'+'x'.repeat(20)}}),SafeError);
+  const target={kind:'issue',number:1,sha,fingerprint:fp};
+  assert.throws(()=>comment({ok:true,provider:'tokyo',text:'result'},target,'',{...cfg,provider:'codex'}),SafeError);
+  const body=comment({ok:true,provider:'claude',text:'result'},target,'',{...cfg,provider:'claude'});
+  assert.match(body,/AI: Claude Code \/ 指定モデル: `sonnet`/);
 });

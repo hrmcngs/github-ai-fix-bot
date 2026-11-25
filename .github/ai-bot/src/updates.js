@@ -133,7 +133,7 @@ export async function applyUpdate(gh,writer,event,env,state,source=new Upstream(
   const freshRef=await gh.request(gh.path(`/git/ref/heads/${encodeURIComponent(auth.branch)}`));
   if(fresh.commit!==auth.commit||freshRef.object?.sha!==base)throw new SafeError('STALE');
   const id=createHash('sha256').update(auth.commit).digest('hex');
-  await createLinkedProposal(writer,{kind:'update',issue:auth.number,runId:env.GITHUB_RUN_ID,sha:base,id,base:auth.branch,title:'chore: update GitHub AI Bot',body:`${marker}\nRefs #${auth.number}\n\n[配布元の変更](https://github.com/${SOURCE}/compare/${state.commit}...${auth.commit})\n\nBot専用ファイルを更新します。設定とAPIキーは保持します。取得ファイルのGit blobハッシュと導入済みファイルの一致を検査しました。上流コード・コマンド・インストーラーは実行していません。更新PRの差分とCIを人間がレビューしてください。自動マージは行いません。`,files,notify:pr=>notify(`更新PRを ${proposalLink(gh,pr.number)} に作成しました。差分とCIを確認してからマージしてください。`)});
+  await createLinkedProposal(writer,{kind:'update',issue:auth.number,runId:env.GITHUB_RUN_ID,sha:base,id,base:auth.branch,title:'chore: update GitHub AI Bot',body:`${marker}\nRefs #${auth.number}\n\n[配布元の変更](https://github.com/${SOURCE}/compare/${state.commit}...${auth.commit})\n\nAI使用: なし（配布元ファイルの更新）。\n\nBot専用ファイルを更新します。設定とAPIキーは保持します。取得ファイルのGit blobハッシュと導入済みファイルの一致を検査しました。上流コード・コマンド・インストーラーは実行していません。更新PRの差分とCIを人間がレビューしてください。自動マージは行いません。`,files,notify:pr=>notify(`更新PRを ${proposalLink(gh,pr.number)} に作成しました。差分とCIを確認してからマージしてください。`)});
 }
 export async function loadInstallation(gh,event,env,action){
   const auth=action==='apply'?await authorizeUpdate(gh,event,env):null;
