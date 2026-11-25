@@ -135,7 +135,7 @@ guided_setup() {
     printf '導入先限定のfine-grained PATに Contents / Pull requests / Workflows の Read and write が必要です。\n'
     printf '発行画面：https://github.com/settings/personal-access-tokens/new\n'
     setup_secret "$repo" AI_BOT_UPDATE_TOKEN || true
-    printf '全体更新は Bot update notices の scope=full から実行します。毎日の自動更新は本体のみです。\n'
+    printf '全体更新は Bot update notices の scope=full から実行します。1時間ごとの自動更新は本体のみです。\n'
   fi
   secret_names=$(gh secret list --repo "$repo" --json name --jq '.[].name' 2>/dev/null) || secret_names=''
   if ! printf '%s\n' "$secret_names" | grep -Fxq "$secret"; then
@@ -317,7 +317,7 @@ Next steps:
   3. Register TOKYO_AI_API_KEY, ANTHROPIC_API_KEY or OPENAI_API_KEY in Actions Secrets.
      Never paste API keys into Issues, comments or workflow inputs.
   4. Actions > AI investigation or AI fix > Run workflow (blank number processes all).
-  5. Bot update notices checks for updates daily and opens an update PR automatically.
+  5. Bot update notices checks for updates hourly and opens an update PR automatically.
      Runtime update PRs use GITHUB_TOKEN; workflow definitions must be updated manually.
      AI investigation also checks runtime updates by default when run manually.
      Optional full updates require AI_BOT_UPDATE_TOKEN and scope=full.

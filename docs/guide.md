@@ -352,7 +352,7 @@ write以上の利用者がIssueのタイトル・本文を編集すると、`Ret
 
 ## Bot自体の更新PR
 
-追加トークン不要の **runtime（本体のみ）** を既定とします。**Bot update notices** が毎日確認し、更新があれば専用ブランチからPRを作成します。最初の **AI investigation → Run workflow** の「Bot本体の更新PRも確認する」（既定ON）からも確認できます。このチェックを外すとその回の確認だけを省略し、毎日の確認は継続します。調査と更新は別ジョブなので、AIのAPIキーが未登録でも更新の確認は可能です。リポジトリのActionsによるPR作成許可が必要です。
+追加トークン不要の **runtime（本体のみ）** を既定とします。**Bot update notices** が1時間ごと（毎時17分）に自動確認し、更新があれば専用ブランチからPRを作成します。最初の **AI investigation → Run workflow** の「Bot本体の更新PRも確認する」（既定ON）からも確認できます。このチェックを外すとその回の確認だけを省略し、1時間ごとの確認は継続します。調査と更新は別ジョブなので、AIのAPIキーが未登録でも更新の確認は可能です。リポジトリのActionsによるPR作成許可が必要です。
 
 runtimeでは `GITHUB_TOKEN` の contents/write・pull-requests/write をPR作成ジョブにだけ与えます。AIキーや追加PATを使用しません。`config.json`、アプリのソース、`.github/workflows/` は変更しません。既存ファイルのハッシュを照合し、独自変更や競合があれば停止します。上流コードは実行せず、人間のレビュー後にマージします。
 
@@ -366,7 +366,7 @@ Actions定義に差分がある場合は、手動更新が必要なファイル�
 
 Actions定義も含めた更新を自動でPRにする場合だけ、導入先限定のfine-grained PATに **Contents / Pull requests / Workflows: Read and write** を付け、Actions Secret `AI_BOT_UPDATE_TOKEN` に登録します。通常のActions入力欄やコメントにトークンを貼らないでください。
 
-**Bot update notices → Run workflow → scope=full** を選びます。毎日の確認とAI investigationからの確認は本体のみです。全体更新でも設定・AIキーは保持し、自動マージしません。[GitHub公式：ワークフロー更新権限](https://docs.github.com/en/rest/repos/contents#create-or-update-file-contents)
+**Bot update notices → Run workflow → scope=full** を選びます。1時間ごとの確認とAI investigationからの確認は本体のみです。全体更新でも設定・AIキーは保持し、自動マージしません。[GitHub公式：ワークフロー更新権限](https://docs.github.com/en/rest/repos/contents#create-or-update-file-contents)
 
 ### 処理の隔離・公開直前の再確認
 
