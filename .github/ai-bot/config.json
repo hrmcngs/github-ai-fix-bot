@@ -1,0 +1,11 @@
+{
+  "mode": "manual",
+  "provider": "tokyo",
+  "models": { "claude": "sonnet", "codex": "gpt-5.4" },
+  "issueLabel": "ai-investigate",
+  "include": ["src/", "lib/", "app/", "js/", "index.js", "package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml"],
+  "maxFiles": 12,
+  "maxFileBytes": 16000,
+  "maxContextBytes": 64000,
+  "maxTargetsPerRun": 1
+}

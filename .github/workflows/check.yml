@@ -1,0 +1,38 @@
+name: Bot checks
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - run: npm run check
+      - run: npm test
+  cli-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        provider: [claude, codex, broker]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Build pinned CLI without API keys
+        env:
+          PROVIDER: ${{ matrix.provider }}
+        run: docker build --build-arg "PROVIDER=$PROVIDER" -f .github/ai-bot/Dockerfile -t ai-bot-smoke .github/ai-bot
+      - name: Check CLI availability offline
+        if: matrix.provider != 'broker'
+        env:
+          PROVIDER: ${{ matrix.provider }}
+        run: docker run --rm --network=none --cap-drop=ALL --security-opt=no-new-privileges --entrypoint "$PROVIDER" ai-bot-smoke --version

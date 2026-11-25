@@ -1,1 +1,145 @@
 # github-ai-fix-bot
+
+GitHub上でIssueやDependabotアラートを調査し、日本語の修正方針をコメントするBotです。各利用者が自分のpublicリポジトリへ導入し、自分のAI認証情報を使用します。管理画面や外部のBotサーバーは不要です。AIへの送信とCLIの取得には外部サービスを利用します。
+
+MVPは**文章による静的調査のみ**です。コード変更、依存更新、テスト・静的解析の実行、ブランチ・PR作成、アラートの却下、直接コミット、自動マージは行いません。AIの回答を根拠に変更を確定せず、人間が調査結果を確認してください。
+
+## 導入
+
+対象のGitリポジトリ内で次のコマンドを実行します（git・curl・bashが必要）。
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/hrmcngs/github-ai-fix-bot/main/install.sh | bash
+```
+
+導入先を指定する場合:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/hrmcngs/github-ai-fix-bot/main/install.sh | bash -s -- --directory /path/to/your-repo
+```
+
+インストーラーはmainを1つのコミットSHAに解決してから必要なファイルをすべてダウンロードし、競合を確認して配置します。既存の `config.json` は保持し、それ以外のファイルが異なる場合は上書きせず停止します。同じ内容での再実行は可能です。更新時の競合は、既存ファイルをレビューして退避してから再実行してください。`--ref` に完全な40桁のコミットSHAを渡すと、取得元を固定できます。
+
+APIキーの入力、依存パッケージのインストール、コミット・push・Actions起動は行いません。配置後に以下の設定を進めてください。公開URLは `install.sh` とBot本体をGitHubのmainへpushした後に利用できます。
+
+1. インストーラーで配置した次のファイルを確認し、レビューしたPRで対象publicリポジトリのデフォルトブランチに取り込みます。手動コピーでの導入も可能です。
+   - `.github/ai-bot/` ディレクトリ全体（隠しファイルの `.dockerignore` も含む）
+   - `.github/workflows/investigate.yml`
+2. GitHub Actionsを有効にします。Dependabotを調査する場合は、対象リポジトリのdependency graphとDependabot alertsも有効にしてください。
+3. `.github/ai-bot/config.json` の `provider`、モデル、調査対象パスを設定します。APIキーは設定ファイルへ書きません。
+4. **Settings → Secrets and variables → Actions → New repository secret** で、選択したAIのSecretを登録します。
+5. Actionsの **AI investigation → Run workflow** で、デフォルトブランチを選び、`target` と `number` を指定します。
+
+既存プロジェクトの `package.json` や `src/` を置き換える必要はありません。Botのコードは `.github/ai-bot/` 内で完結し、外部のnpm依存はありません。Node.jsはワークフローが用意します。CLI実行にはGitHub-hosted Ubuntu runner上のDockerを使用します。self-hosted runner、Windows、privateリポジトリは対象外です。
+
+このリポジトリ自体で試す場合も、同じ手順でSecretの登録が必要です。利用者のキーを他人が管理する共通リポジトリに集約しないでください。forkではActionsや定期実行の有効化を確認してください。
+
+## AIを選ぶ
+
+| `provider` | 実行方式 | Repository Secret |
+| --- | --- | --- |
+| `tokyo` | 東京都の文字生成API | `TOKYO_AI_API_KEY` |
+| `claude` | 公式Claude Code CLIの非対話モード | `ANTHROPIC_API_KEY` |
+| `codex` | 公式Codex CLIの `exec` | `OPENAI_API_KEY` |
+
+選択したAIのキーだけが実行ステップへ渡されます。別のAIへの自動フォールバックは行いません。Claude CodeとCodexは、それぞれのAPIキーによる認証です。Claude/ChatGPTアプリへのログインやサブスクリプションの認証を再利用する実装ではありません。API料金・利用枠・モデルへのアクセス権は各サービスで確認してください。
+
+`models.claude`、`models.codex` で利用可能なモデルを指定します。初期設定は `sonnet`、`gpt-5.4` です。アカウントで利用できないモデルは変更してください。東京都APIのモデル選択は、提供された仕様にないため実装していません。
+
+### 東京都API
+
+- エンドポイントは `https://ai-api.metro.tokyo.lg.jp/api/v1/public/message` に固定。
+- `Authorization: Bearer <キー>` とJSON `{ "input": "...", "conversation_id": "" }` を送信。
+- 成功時は `message` を使用。実行をまたぐ会話履歴や `conversation_id` は保存しない。
+- 1対象につき1リクエスト。タイムアウトは90秒。自動再試行なし。
+- キーは1〜8時間の一時キーで、利用回数上限もある。発行・更新は利用者が行う。
+
+Repository Secretはワークフローのキュー投入時に読み込まれます。キー更新後は、古い実行の再開に頼らず、**Run workflowから新しい実行を開始**してください。キー登録から実行開始までの待機時間も有効期限に含まれます。Environment Secretを利用する構成への変更時は、その読み込み時点が異なることに注意してください。
+
+HTTP 401/403は認証失敗、402/429は利用枠・レート制限として表示します。授業用APIの詳しいエラー仕様は提示されていないため、期限切れと不正キーの区別は行いません。HTTP 200で返る業務エラーも、識別仕様が確認できるまでは厳密に判別できません。
+
+キーをIssue、コメント、PR、Actionsの通常入力、ログへ貼らないでください。使用後の削除・失効も利用者が行います。BotにSecretsの管理権限はありません。
+
+## 手動・自動モード
+
+初期設定は `"mode": "manual"` です。この状態ではラベルや定期実行からAIを呼び出しません。
+
+`"mode": "automatic"` に変更してデフォルトブランチへ取り込むと、次の自動処理を有効にします。手動実行も引き続き使えます。
+
+- **Issue**: write/maintain/admin権限を持つ利用者が `ai-investigate` ラベルを付けたとき。ラベル名は `issueLabel` で変更できます。ラベルはGitHubのIssues画面から作成してください。Issueの新規作成だけでは起動しません。
+- **Dependabot**: 毎時23分（UTC）にopenアラートを古い順に確認。成功済みの調査を除き、初期値で1件だけ処理します。
+
+定期実行には遅延があり、即時性は保証されません。publicリポジトリでは一定期間活動がないとGitHubが定期実行を無効にする場合があります。ワークフロー全体を直列化しますが、Actionsのconcurrencyによる待機中の実行の置き換えもあるため、イベントを確実に全件処理するキューではありません。取りこぼしたIssueは手動で実行してください。
+
+自動モードでも一時キーは自動更新されません。授業中だけ自動モードを使う場合は、授業前にキーを更新し、終了後はmanualへ戻してください。無効なキーでの繰り返し実行を止めるにはmanualへ戻すか、ワークフローを無効にします。
+
+`maxTargetsPerRun` は1〜3件です。Claude Codeには対象ごとに1ターン・1 USDのCLI予算上限、認証中継には最大8リクエスト、実行には時間制限を設定しています。これはプロバイダーの課金額を保証する厳密な予算管理ではありません。OpenAI/Anthropic側でも予算・利用枠を設定してください。
+
+## 調査資料と結果
+
+デフォルトブランチのコミットSHAを固定し、許可したパスからJavaScript、JSX、manifest、lockfileの一部を取得します。シンボリックリンク、隠しパス、node_modules、秘密情報を示すファイル名は除外します。ファイル数・ファイルサイズ・合計容量に上限があり、全体を読んだ調査ではありません。省略情報もAIへ渡します。Dependabotでは対象manifestを優先します。
+
+`include` はディレクトリの前方一致（末尾 `/`）またはファイルの完全一致です。globは使いません。コードが `frontend/` にある場合などは追加してください。Issueコメント、README、外部URL、PRのコードは取得しません。設定やMCP、フックとして調査対象の内容を読み込むこともありません。
+
+APIキーらしい文字列は送信前にマスクしますが、**全種類の秘密を自動検出できる保証はありません**。publicの内容であっても、AIへの送信を許可したリポジトリでのみ使用してください。
+
+結果には要約、ファイル上の根拠、修正方針、不確実な点、人間が行う検証を求めます。ファイルの引用や結論はAIの生成物であり、人間による照合が必要です。生のAI出力はコードブロックとして投稿し、HTML・メンションを無効化します。
+
+- Issue: 対象Issueへのコメント。
+- Dependabot: Botが作成する **Dependabot調査レポート** Issueへのコメント。アラート自身には通常のIssueコメント欄がありません。
+- 両方: 投稿ジョブのJob Summary。
+
+**publicリポジトリのコメント・Summary・成果物には公開情報として扱う内容だけを載せてください。** Dependabotの情報もレポートIssueへ公開します。調査資料とマスク済み結果のActions成果物は保持期間1日で作成します。
+
+同じ対象内容・対象SHA・AI設定・パス設定で成功済みの調査は省略します。失敗コメントは成功扱いにせず、同じ調査の再試行では既存コメントを更新します。ソースが変わると新しい調査になります。重複確認は最大1000コメント／Issue一覧までで、上限に達した場合は安全のため停止します。
+
+## 権限と隔離
+
+| ジョブ | GitHub権限 | AIキー |
+| --- | --- | --- |
+| prepare | contents/read、issues/read、vulnerability-alerts/read | なし |
+| analyze | contents/read（Botのcheckout用） | 選んだAIのキーのみ |
+| publish | contents/read、issues/write | なし |
+
+- workflow_dispatchはデフォルトブランチ限定。Issue起動時もラベルを付けた利用者の権限をAPIで再確認。
+- forkのPRや `pull_request_target` からAI実行はしない。CIのPRチェックにはSecretを渡さない。
+- ActionsはコミットSHA、コンテナ基盤はdigest、CLIはバージョンで固定。更新はレビューして行う。
+- checkoutは認証情報を永続化しない。対象プロジェクトの依存インストール・npmスクリプト・ビルドを実行しない。
+- Claude Code/Codexには、作業ツリーをマウントせず、サイズ制限した調査資料を標準入力で渡す。
+- CLIは非root・読み取り専用コンテナ内で実行。capabilityを削除し、メモリ・プロセス数・一時領域・時間に上限を設ける。
+- CLIコンテナはinternalネットワークに置き、ホストのファイル・Dockerソケット・本物のAIキー・GitHubトークンを渡さない。外部DNSへの転送も抑制する。
+- 認証中継コンテナだけが本物のキーを保持。転送先とAPIパスを固定し、HTTPリダイレクトを拒否。任意URLへのプロキシやGitHubへの接続には使えない。
+- 中継がAIリクエストからtools宣言を取り除き、CLIにも最小権限を指定。Codexの読み取り専用設定だけを秘密保護の境界とは扱わない。
+- AIやCLIの生ログ・APIのエラー本文は公開しない。投稿ジョブはAI出力をコマンドや投稿先指定として解釈しない。
+
+Issueやコード内の指示を信用しない旨をプロンプトにも指定しますが、プロンプトだけで攻撃を防ぐ設計ではありません。リポジトリのwrite権限を持つ利用者はワークフロー自体を変更できるため、Secretsを使うリポジトリの共同管理者は信頼できる人に限定し、デフォルトブランチを保護してください。
+
+将来の修正機能は別段階です。専用ブランチ、Secretなしの隔離検証、成功時だけPRを公開する条件、人間の必須レビューを設計してから追加します。
+
+## 失敗した場合
+
+認証失敗、利用上限、通信失敗、無効な回答、隔離環境の実行失敗は定型文で報告します。AI呼び出しの失敗コメントを投稿した場合も、ワークフローは失敗扱いにします。権限不足・設定不備・イメージビルド失敗など、投稿まで進めない障害はActionsの失敗ステップを確認してください。APIが返す業務エラーの詳細は、各提供元の仕様確認が必要です。
+
+キーはSecret画面で更新し、新しく手動実行してください。キー・HTTPヘッダー・生レスポンス・CLIの認証ファイルを共有して調査しないでください。
+
+## 開発・検証
+
+```sh
+npm run check
+npm test
+```
+
+ローカルテストには実キーや外部接続を使用しません。設定検証、権限制御、対象取得、マスク、重複判定、API失敗、認証中継、コンテナ起動引数、コメント投稿を模擬応答で検証します。`Bot checks` ワークフローには、認証情報なしのDockerビルドとCLI起動チェックも含めています。
+
+開発時点ではローカルにDockerがないため、Docker実行と各AIの実接続は未検証です。GitHub Actions上のチェックを通した後、利用者のSecretで小さなIssueを1件手動実行して確認してください。実接続では提供元の利用枠を消費します。東京都APIのレスポンス仕様は、提示された授業用サンプルに基づきます。
+
+## 公式資料
+
+- [手動でActionsを実行する](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow)
+- [Actions Secrets](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets)
+- [Secretsの読み込み時点](https://docs.github.com/en/actions/reference/security/secrets)
+- [Actionsの権限](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions)
+- [Claude CodeのGitHub Actions対応](https://code.claude.com/docs/en/github-actions)
+- [Claude Code CLI](https://code.claude.com/docs/en/cli-reference)
+- [Codex GitHub Actionと安全対策](https://developers.openai.com/codex/github-action)
+- [Codexの非対話実行](https://developers.openai.com/codex/noninteractive)
