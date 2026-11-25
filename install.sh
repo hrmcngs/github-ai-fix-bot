@@ -89,7 +89,7 @@ setup_secret() {
   fi
 }
 guided_setup() {
-  local root=$1 repo='' provider='' mode='' secret='' visibility='' defaults='' secret_names=''
+  local root=$1 repo='' provider='' mode='' secret='' visibility='' defaults='' secret_names='' full_updates=false
   repo=$(cd "$root" && gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null) || fail 'gh auth login を実行してから --setup を再実行してください。'
   [[ "$repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || fail '導入先を確認できませんでした。'
   printf '\nかんたん設定：%s\n' "$repo"
@@ -128,14 +128,20 @@ guided_setup() {
       printf 'PR作成許可を取得できませんでした。設定画面で確認してください。\n'
     fi
   fi
-  printf '\nBot更新PRを受け取る場合だけ、導入先限定のfine-grained PATが必要です。\nContents / Pull requests / Workflows を Read and write にしてください。\n'
-  printf '発行画面：https://github.com/settings/personal-access-tokens/new\n'
-  setup_secret "$repo" AI_BOT_UPDATE_TOKEN || true
+  printf '\nBot本体の更新PRは追加トークンなしで受け取れます。Actions定義は手動更新です。\n'
+  setup_prompt 'Actions定義も自動更新するためのトークンを登録しますか？ [y/N]: ' || return 1
+  if [[ "$REPLY" == y || "$REPLY" == Y ]]; then
+    full_updates=true
+    printf '導入先限定のfine-grained PATに Contents / Pull requests / Workflows の Read and write が必要です。\n'
+    printf '発行画面：https://github.com/settings/personal-access-tokens/new\n'
+    setup_secret "$repo" AI_BOT_UPDATE_TOKEN || true
+    printf '全体更新は Bot update notices の scope=full から実行します。毎日の自動更新は本体のみです。\n'
+  fi
   secret_names=$(gh secret list --repo "$repo" --json name --jq '.[].name' 2>/dev/null) || secret_names=''
   if ! printf '%s\n' "$secret_names" | grep -Fxq "$secret"; then
     printf '未完了：%s の登録を確認できません。試運転前にSecrets画面で登録してください。\n' "$secret"
   fi
-  if ! printf '%s\n' "$secret_names" | grep -Fxq AI_BOT_UPDATE_TOKEN; then
+  if [[ "$full_updates" == true ]] && ! printf '%s\n' "$secret_names" | grep -Fxq AI_BOT_UPDATE_TOKEN; then
     printf 'Bot更新PR：トークンを確認できません。必要な場合は後から登録できます。\n'
   fi
   printf '\n設定ファイル：%s/.github/ai-bot/config.json\n' "$root"
@@ -312,7 +318,9 @@ Next steps:
      Never paste API keys into Issues, comments or workflow inputs.
   4. Actions > AI investigation or AI fix > Run workflow (blank number processes all).
   5. Bot update notices checks for updates daily and opens an update PR automatically.
-     Optional update PRs require AI_BOT_UPDATE_TOKEN with Contents, Pull requests and Workflows write.
+     Runtime update PRs use GITHUB_TOKEN; workflow definitions must be updated manually.
+     AI investigation also checks runtime updates by default when run manually.
+     Optional full updates require AI_BOT_UPDATE_TOKEN and scope=full.
 
 Docs: https://github.com/hrmcngs/github-ai-fix-bot#readme
 NEXT

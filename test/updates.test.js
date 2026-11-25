@@ -4,7 +4,7 @@ import {createHash} from 'node:crypto';
 import {readFile,mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {SOURCE,STATE,MANIFEST,UPDATE_MARKER,manifest,installation,Upstream,release,checkUpdate,authorizeUpdate,updateFiles,applyUpdate,loadInstallation,authorizeAutomaticUpdate,updateStatus} from '../.github/ai-bot/src/updates.js';
+import {SOURCE,STATE,MANIFEST,UPDATE_MARKER,manifest,installation,Upstream,release,scopedRelease,checkUpdate,authorizeUpdate,updateFiles,applyUpdate,loadInstallation,authorizeAutomaticUpdate,updateStatus} from '../.github/ai-bot/src/updates.js';
 const old='a'.repeat(40),latest='b'.repeat(40),base='c'.repeat(40);
 const file='.github/ai-bot/src/main.js';
 const gitHash=content=>createHash('sha1').update(`blob ${Buffer.byteLength(content)}\0`).update(content).digest('hex');
@@ -166,4 +166,38 @@ test('repeated automatic status reports do not post duplicate comments',async()=
   await updateStatus(f.gh,9,latest,'setup needed');assert.equal(f.gh.calls.length,0);
   await updateStatus(f.gh,9,latest,'PR created');assert.equal(f.gh.calls.length,1);
   assert.equal(f.gh.calls[0].method,'PATCH');assert.equal(f.gh.calls[0].p,'/repos/a/b/issues/comments/42');
+});
+
+test('runtime projection retains installed workflow hashes and identifies manual workflow updates',async()=>{
+  const f=fixture(),latestRelease=await release(f.source),runtime=scopedRelease(latestRelease,f.state,'runtime');
+  assert.equal(runtime.files['.github/workflows/fix.yml'],f.state.files['.github/workflows/fix.yml']);
+  assert.deepEqual(runtime.manualWorkflows,['.github/workflows/fix.yml']);
+  const changes=await updateFiles(f.gh,f.state,runtime,f.source,base);
+  assert.ok(changes.every(c=>!c.path.startsWith('.github/workflows/')));
+  const state=JSON.parse(changes.find(c=>c.path===STATE).content);
+  assert.equal(state.updateScope,'runtime');assert.equal(state.files['.github/workflows/fix.yml'],f.state.files['.github/workflows/fix.yml']);
+  assert.equal(await checkUpdate(f.gh,state,f.source,'runtime'),undefined);
+  assert.deepEqual(await checkUpdate(f.gh,state,f.source,'full'),{commit:latest});
+});
+test('runtime update uses GITHUB_TOKEN without a separate writer and never writes workflows',async()=>{
+  const f=fixture();await applyUpdate(f.gh,null,{repository:{full_name:'a/b'}},{...automatic(f),AI_BOT_UPDATE_SCOPE:'runtime'},f.state,f.source);
+  const tree=f.gh.calls.find(c=>c.method==='POST'&&c.p.endsWith('/git/trees'));
+  assert.ok(tree);assert.ok(tree.body.tree.every(c=>!c.path.startsWith('.github/workflows/')));
+  const pr=f.gh.calls.find(c=>c.method==='POST'&&c.p.endsWith('/pulls'));
+  assert.ok(pr.body.body.includes('本体のみ'));assert.ok(pr.body.body.includes('.github/workflows/fix.yml'));
+});
+test('runtime scope neither adopts nor overwrites locally changed workflows',async()=>{
+  const f=fixture();f.tree.find(t=>t.path==='.github/workflows/fix.yml').sha=base;
+  const latestRelease=await release(f.source),runtime=scopedRelease(latestRelease,f.state,'runtime');
+  const changes=await updateFiles(f.gh,f.state,runtime,f.source,base);
+  assert.ok(changes.every(c=>!c.path.startsWith('.github/workflows/')));
+  await assert.rejects(updateFiles(f.gh,f.state,latestRelease,f.source,base));
+});
+test('workflow-only upstream changes do not repeatedly create runtime PRs',async()=>{
+  const f=fixture(),latestRelease=await release(f.source);
+  const state={...f.state,files:{...latestRelease.files,'.github/workflows/fix.yml':f.state.files['.github/workflows/fix.yml']}};
+  assert.equal(await checkUpdate(f.gh,state,f.source,'runtime'),undefined);
+  await applyUpdate(f.gh,null,{repository:{full_name:'a/b'}},{...automatic(f),AI_BOT_UPDATE_SCOPE:'runtime'},state,f.source);
+  assert.ok(!f.gh.calls.some(c=>c.method==='POST'&&c.p.endsWith('/pulls')));
+  assert.throws(()=>scopedRelease(latestRelease,state,'unknown'));
 });

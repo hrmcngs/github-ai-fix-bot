@@ -58,9 +58,9 @@ curl -fsSL https://raw.githubusercontent.com/hrmcngs/github-ai-fix-bot/main/inst
 
 設定を保持し、置き換えるBotファイルをバックアップします。差分を確認して取り込んでください。
 
-**更新PRを自動で受け取る：** 導入先だけを対象にしたfine-grained PATを発行し、**Contents / Pull requests / Workflows: Read and write** を付け、Actions Secret **`AI_BOT_UPDATE_TOKEN`** に登録します。
+**更新PRを自動で受け取る：** 追加トークンは不要です。毎日、Bot本体の更新を確認します。最初の **AI investigation → Run workflow** の「Bot本体の更新PRも確認する」からも実行できます。ActionsのPR作成許可は必要です。
 
-毎日新版を確認し、更新があればPRを作ります。Issueやコメントは不要です。レビューしてマージするとBotが更新されます。[トークンの設定手順](docs/guide.md#初回の設定)
+Actions定義は手動更新です。必要なファイルを更新PRに記載します。全体更新を手動起動する場合だけ、追加トークンと `scope=full` が必要です。[更新の詳細](docs/guide.md#bot自体の更新pr)
 
 ## 注意点
 
