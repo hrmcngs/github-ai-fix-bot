@@ -32,7 +32,7 @@ export function markdown(text) {
       fence=open[1];
       const language=open[2].trim();
       // GitHub supports active diagram fences. Treat unknown fence types as plain code.
-      const safe=/^(?:js|javascript|json|sh|bash|py|python|ts|typescript|text|txt|diff|yaml|yml|html|css|md|markdown|console|shell|toml)?$/i.test(language)?language:'text';
+      const safe=/^(?:js|javascript|json|sh|bash|py|python|ts|typescript|sql|text|txt|diff|yaml|yml|html|css|md|markdown|console|shell|toml)?$/i.test(language)?language:'text';
       output.push(fence+safe);continue;
     }
     output.push(inline(line.replace(/((?:`{3,}|~{3,}))\s*(?:mermaid|geojson|topojson|stl)(?=\s*$)/gi,'$1text')));
