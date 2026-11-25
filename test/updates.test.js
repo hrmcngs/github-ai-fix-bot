@@ -4,7 +4,7 @@ import {createHash} from 'node:crypto';
 import {readFile,mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {SOURCE,STATE,MANIFEST,UPDATE_MARKER,manifest,installation,Upstream,release,scopedRelease,checkUpdate,authorizeUpdate,updateFiles,applyUpdate,loadInstallation,authorizeAutomaticUpdate,updateStatus} from '../.github/ai-bot/src/updates.js';
+import {SOURCE,STATE,MANIFEST,UPDATE_MARKER,manifest,installation,Upstream,release,scopedRelease,updateContext,updateError,checkUpdate,authorizeUpdate,updateFiles,applyUpdate,loadInstallation,authorizeAutomaticUpdate,updateStatus} from '../.github/ai-bot/src/updates.js';
 const old='a'.repeat(40),latest='b'.repeat(40),base='c'.repeat(40);
 const file='.github/ai-bot/src/main.js';
 const gitHash=content=>createHash('sha1').update(`blob ${Buffer.byteLength(content)}\0`).update(content).digest('hex');
@@ -201,4 +201,13 @@ test('workflow-only upstream changes do not repeatedly create runtime PRs',async
   await applyUpdate(f.gh,null,{repository:{full_name:'a/b'}},{...automatic(f),AI_BOT_UPDATE_SCOPE:'runtime'},state,f.source);
   assert.ok(!f.gh.calls.some(c=>c.method==='POST'&&c.p.endsWith('/pulls')));
   assert.throws(()=>scopedRelease(latestRelease,state,'unknown'));
+});
+
+test('update entry validates repository and ref separately and reports only safe categories',()=>{
+  const gh={repo:'a/b'},event={repository:{full_name:'a/b'}},env={GITHUB_REF:'refs/heads/main'},repo={default_branch:'main'};
+  updateContext(gh,event,env,repo);
+  assert.throws(()=>updateContext(gh,{repository:{full_name:'other/repo'}},env,repo),e=>e.code==='UPDATE_REPOSITORY');
+  assert.throws(()=>updateContext(gh,event,{GITHUB_REF:'refs/heads/feature'},repo),e=>e.code==='UPDATE_BRANCH');
+  assert.ok(updateError({code:'UPDATE_BRANCH'}).includes('デフォルトブランチ'));
+  assert.ok(!updateError(new Error('secret-api-key')).includes('secret-api-key'));
 });
