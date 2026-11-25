@@ -26,7 +26,10 @@ const args=process.argv.slice(2),url=args.find(x=>x.startsWith('https://'));
 if(!url || !url.includes('/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/'))process.exit(2);
 const relative=url.split('/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/')[1];
 if(relative===process.env.FAIL_DOWNLOAD)process.exit(22);
-fs.copyFileSync(path.join(process.env.FIXTURE_SOURCE,relative),args[args.indexOf('--output')+1]);
+const output=args[args.indexOf('--output')+1];
+fs.copyFileSync(path.join(process.env.FIXTURE_SOURCE,relative),output);
+// HTTP downloads create writable files even when the fixture source is mounted readonly.
+fs.chmodSync(output,0o644);
 `,{mode:0o755});
   const run=(extra={},args=[])=>spawnSync('bash',['-s','--','--directory',root,...args],{input:script,encoding:'utf8',cwd:dir,env:{PATH:`${bin}:/usr/bin:/bin`,HOME:join(dir,'home'),TMPDIR:dir,FIXTURE_ROOT:root,FIXTURE_SOURCE:source,...extra}});
   try{await fn({root,dir,run});}finally{await rm(dir,{recursive:true,force:true});}
