@@ -34,6 +34,10 @@ fs.chmodSync(output,0o644);
 `,{mode:0o755});
   await writeFile(join(bin,'gh'),`#!${process.execPath}
 const fs=require('node:fs'),args=process.argv.slice(2);
+if(args.some(a=>a.includes('/labels'))){
+  fs.appendFileSync(process.env.TMPDIR+'/label-calls.jsonl',JSON.stringify(args)+'\\n');
+  process.exit(process.env.MISSING_LABELS==='true'&&!args.includes('POST')?1:0);
+}
 fs.appendFileSync(process.env.TMPDIR+'/gh-calls.jsonl',JSON.stringify(args)+'\\n');
 if(args.includes('--jq')){process.stdout.write(process.env.FIXTURE_ADMIN||'false');process.exit(0);}
 if(args.at(-1).endsWith('/automated-security-fixes')&&process.env.FAIL_SECURITY==='true')process.exit(1);
@@ -139,4 +143,12 @@ test('security setup can be skipped and never contacts other hosts',()=>fixture(
   const result=run({FIXTURE_ORIGIN:'https://example.com/owner/project.git',FIXTURE_ADMIN:'true'});
   assert.equal(result.status,0);assert.match(result.stdout,/origin must identify/);
   await assert.rejects(access(join(dir,'gh-calls.jsonl')));
+}));
+
+test('installer creates missing labels without changing existing labels or enabling auto-merge',()=>fixture(async({dir,run})=>{
+  assert.equal(run({FIXTURE_ORIGIN:'https://github.com/owner/project.git',MISSING_LABELS:'true'},['--skip-security-updates']).status,0);
+  const calls=(await readFile(join(dir,'label-calls.jsonl'),'utf8')).trim().split('\n').map(JSON.parse);
+  const writes=calls.filter(c=>c.includes('POST'));assert.equal(writes.length,3);
+  for(const label of ['ai-fix','ai-investigate','ai-auto-merge'])assert.ok(writes.some(c=>c.includes('name='+label)));
+  assert.ok(calls.every(c=>!c.includes('PATCH')&&!c.includes('PUT')));
 }));

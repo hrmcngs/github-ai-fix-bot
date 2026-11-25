@@ -15,6 +15,7 @@ try{
   await mkdir(join(dir,'src'));await mkdir(join(dir,'.work'));await mkdir(join(dir,'home'));
   await writeFile(join(dir,'package.json'),'{"type":"module"}');
   await writeFile(join(dir,'src/add.js'),oldSource);
+  await writeFile(join(dir,'README.md'),'Old documentation\n');
   await writeFile(join(dir,'test.mjs'),`import assert from 'node:assert/strict';
 import {writeFileSync} from 'node:fs';
 import {connect} from 'node:net';
@@ -41,7 +42,7 @@ await new Promise((resolve,reject)=>{
 `);
   const gitEnv={PATH:process.env.PATH,HOME:join(dir,'home'),TMPDIR:dir};
   const git=async(...args)=>exec('git',args,{cwd:dir,env:gitEnv});
-  await git('init','-q');await git('add','package.json','src/add.js','test.mjs');
+  await git('init','-q');await git('add','package.json','src/add.js','test.mjs','README.md');
   await git('-c','user.name=Bot smoke test','-c','user.email=smoke@example.invalid','-c','commit.gpgsign=false','-c','core.hooksPath=/dev/null','commit','-qm','fixture');
   const sha=(await git('rev-parse','HEAD')).stdout.trim();
   const settings={...cfg,fix:{enabled:true,label:'ai-fix',commands:[['node','--test','test.mjs']]}};
@@ -58,5 +59,12 @@ await new Promise((resolve,reject)=>{
   assert.equal(passing.ok,true,'A correct fix must pass the real offline Docker validator');
   assert.equal((await validate('export const add=(a,b)=>0;\n')).ok,false,'A test failure must block publication');
   assert.equal((await validate('export const add=;\n')).ok,false,'Invalid syntax must block publication');
+  const repairBundle={...bundle,repair:{number:1},context:{files:[...bundle.context.files,{path:'README.md',content:'Old documentation\n'}]}};
+  await writeFile('.work/fix-bundle.json',JSON.stringify(repairBundle));
+  await writeFile('.work/fix-plan.json',JSON.stringify({ok:true,plan:{confidence:'high',summary:'Resolve both PR paths',changes:[{path:'src/add.js',content:goodSource},{path:'README.md',content:'# Integrated documentation\n'}]}}));
+  await validateFix({GITHUB_REPOSITORY:'a/b'});
+  const repaired=JSON.parse(await readFile('.work/fix-verdict.json'));
+  assert.equal(repaired.ok,true,'A repair mixing JavaScript and Markdown must pass offline tests');
+  assert.deepEqual(repaired.checks.map(c=>c.argv),[['node','--check','src/add.js'],['node','--test','test.mjs']]);
   console.log('Docker validation passed: correct fix, failing tests, syntax failure, no credentials, read-only toolchain, distinct verifier identity and blocked network.');
 }finally{process.chdir(original);await rm(dir,{recursive:true,force:true});}

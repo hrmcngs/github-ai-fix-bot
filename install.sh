@@ -19,6 +19,28 @@ HELP
 }
 fail() { printf 'Error: %s\n' "$*" >&2; exit 1; }
 
+ensure_bot_labels() {
+  local root=$1 origin='' repo='' label='' names='ai-fix ai-investigate ai-auto-merge'
+  command -v gh >/dev/null 2>&1 || return 0
+  origin=$(git -C "$root" remote get-url origin 2>/dev/null) || return 0
+  case "$origin" in
+    https://github.com/*) repo=${origin#https://github.com/} ;;
+    git@github.com:*) repo=${origin#git@github.com:} ;;
+    ssh://git@github.com/*) repo=${origin#ssh://git@github.com/} ;;
+    *) return 0 ;;
+  esac
+  repo=${repo%.git}
+  [[ "$repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || return 0
+  if command -v node >/dev/null 2>&1; then
+    names=$(node -e 'const fs=require("node:fs"),c=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));const names=[c.fix?.label||"ai-fix",c.issueLabel||"ai-investigate",c.autoMerge?.label||"ai-auto-merge"];if(names.some(n=>typeof n!=="string"||!/^[\w-]{1,50}$/.test(n)))process.exit(1);console.log([...new Set(names)].join(" "))' "$root/.github/ai-bot/config.json" 2>/dev/null) || names='ai-fix ai-investigate ai-auto-merge'
+  fi
+  for label in $names; do
+    if ! gh api --hostname github.com "repos/$repo/labels/$label" >/dev/null 2>&1; then
+      gh api --hostname github.com --method POST "repos/$repo/labels" -f "name=$label" -f color=2da44e >/dev/null 2>&1 || printf 'Could not create label: %s\n' "$label"
+    fi
+  done
+}
+
 enable_security_updates() {
   local root=$1 origin='' repo=''
   origin=$(git -C "$root" remote get-url origin 2>/dev/null) || origin=''
@@ -83,8 +105,6 @@ guided_setup() {
   done
   node "$root/.github/ai-bot/src/configure.js" "$root" "$provider" "$mode" || return 1
   setup_secret "$repo" "$secret" || true
-  gh label create ai-fix --repo "$repo" --description 'AIによる修正PRを依頼' >/dev/null 2>&1 || true
-  gh label create ai-investigate --repo "$repo" --description 'AIによる調査を依頼' >/dev/null 2>&1 || true
   visibility=$(gh api --hostname github.com "repos/$repo" --jq .private 2>/dev/null) || visibility='unknown'
   if [[ "$visibility" == true ]]; then
     setup_prompt 'privateのIssueと許可したソースの一部を選んだAIへ送信してよいですか？ [y/N]: ' || return 1
@@ -129,6 +149,7 @@ main() {
     .github/ai-bot/package.json
     .github/ai-bot/config.json
     .github/ai-bot/distribution.json
+    .github/ai-bot/src/conflicts.js
     .github/ai-bot/src/configure.js
     .github/ai-bot/src/bulk.js
     .github/ai-bot/src/updates.js
@@ -271,6 +292,7 @@ main() {
     pending=''
   fi
   if [[ "$setup" == true ]]; then guided_setup "$root" || fail '設定が完了しませんでした。保存済みの設定はgit diffとSecretsで確認してください。'; fi
+  ensure_bot_labels "$root"
   if [[ "$security_updates" == true ]]; then enable_security_updates "$root"; fi
   printf '\nInstalled in: %s\nSource commit: %s\n' "$root" "$commit"
   cat <<'NEXT'

@@ -20,18 +20,18 @@ export function referenceChoice(event,env,cfg){
   }
   return fallback;
 }
-export function isCommand(event, env, command) {
+export function isCommand(event, env, command, allowPR=false) {
   return env.GITHUB_EVENT_NAME === 'issue_comment'
     && event.action === 'created'
-    && !event.issue?.pull_request
+    && (!event.issue?.pull_request || (allowPR&&command==='/ai-fix'))
     && event.comment?.user?.type === 'User'
     && event.comment.user.login === env.GITHUB_ACTOR
     && typeof event.comment.body === 'string'
     && commandMatches(event.comment.body,command);
 }
 // Re-read from GitHub at preparation and publication. Deleted/edited commands cannot authorize work.
-export async function requireCommand(gh, event, env, command) {
-  if (!isCommand(event,env,command) || event.repository?.full_name !== gh.repo) throw new SafeError('ACCESS');
+export async function requireCommand(gh, event, env, command, allowPR=false) {
+  if (!isCommand(event,env,command,allowPR) || event.repository?.full_name !== gh.repo) throw new SafeError('ACCESS');
   const n=number(event.issue?.number),id=number(event.comment.id);
   const current=await gh.request(gh.path(`/issues/comments/${id}`));
   if (current.user?.type !== 'User' || current.user.login !== env.GITHUB_ACTOR
