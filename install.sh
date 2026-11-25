@@ -25,6 +25,7 @@ main() {
     .github/ai-bot/config.json
     .github/ai-bot/src/core.js
     .github/ai-bot/src/commands.js
+    .github/ai-bot/src/auto-merge.js
     .github/ai-bot/src/markdown.js
     .github/ai-bot/src/github.js
     .github/ai-bot/src/main.js
@@ -36,6 +37,7 @@ main() {
     .github/ai-bot/src/verify-container.js
     .github/workflows/investigate.yml
     .github/workflows/fix.yml
+    .github/workflows/auto-merge.yml
   )
   while (($#)); do
     case "$1" in
