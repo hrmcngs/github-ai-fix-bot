@@ -64,6 +64,7 @@ export async function select(env=process.env,ghArg){
   const text=`対象: ${targets.length}件。各対象を個別に処理し、検証失敗時は修正PRを作成しません。`;
   console.log(text);if(env.GITHUB_STEP_SUMMARY)await appendFile(env.GITHUB_STEP_SUMMARY,text+'\n');
 }
+// Report known failure categories without exposing inputs or API response bodies.
 export function selectionError(error){
   const specific={
     BULK_BRANCH:'デフォルトブランチを選んで実行してください。',
