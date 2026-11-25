@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
-import {selectTargets,workerEvent} from '../.github/ai-bot/src/bulk.js';
+import {selectTargets,workerEvent,selectionError} from '../.github/ai-bot/src/bulk.js';
 const cfg=JSON.parse(await readFile(new URL('../.github/ai-bot/config.json',import.meta.url)));
 const env={GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_REF:'refs/heads/main',GITHUB_ACTOR:'owner'};
 const event={repository:{full_name:'a/b'},inputs:{target:'all',number:''}};
@@ -67,4 +67,14 @@ test('shared scheduling admission belongs to authorized jobs rather than untrust
       assert.ok(text.includes('    concurrency:'));
     }
   }
+});
+
+test('selection reports safe, actionable reasons for invalid inputs and unavailable alert lists',async()=>{
+  for(const [inputs,code]of [[{target:'all',number:'1'},'BULK_NUMBER'],[{target:'all',result:'report-pr'},'BULK_REPORT']]){
+    await assert.rejects(selectTargets(github(),{...event,inputs},env,cfg,'investigate'),e=>e.code===code);
+    assert.ok(!selectionError({code}).includes('権限・Dependabot'));
+  }
+  await assert.rejects(selectTargets(github({alertFailure:true}),event,env,cfg,'investigate'),e=>e.code==='BULK_ALERTS');
+  assert.ok(selectionError({code:'BULK_ALERTS'}).includes('target=issue'));
+  assert.ok(!selectionError({message:'secret-api-key'}).includes('secret-api-key'));
 });
