@@ -4,24 +4,18 @@ Issue・DependabotアラートをAIで調査し、結果のコメントや修正
 
 ## 導入
 
-対象リポジトリ内で実行します。
+対象リポジトリ内で実行し、表示される日本語の質問に答えてください（git・curl・bash・Node.js 22以上・GitHub CLIが必要）。
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/hrmcngs/github-ai-fix-bot/main/install.sh | bash
+gh auth login
+curl -fsSL https://raw.githubusercontent.com/hrmcngs/github-ai-fix-bot/main/install.sh | bash -s -- --setup
 ```
 
-1. `.github/ai-bot/config.json` でAI・対象パス・修正時のテストコマンドを設定します。
-2. **Settings → Secrets and variables → Actions** に、使うAIのSecretを登録します。
-3. **Settings → Actions → General** の **Allow GitHub Actions to create and approve pull requests** を有効にします。
-4. 配置されたBotファイルとワークフローを確認し、PRでデフォルトブランチに取り込みます。
+AI選択・キーのSecret登録・開始方法・private送信許可・PR作成許可・更新トークンの登録を順に設定します。キーは非表示で入力し、Secretsへ直接登録します。既存設定も `--setup` では選択した内容に変更します。
 
-| AI（`provider`） | Secret名 |
-| --- | --- |
-| 東京都AI（`tokyo`） | `TOKYO_AI_API_KEY` |
-| Claude Code（`claude`） | `ANTHROPIC_API_KEY` |
-| OpenAI Codex（`codex`） | `OPENAI_API_KEY` |
+最後に `git diff` を確認し、BotファイルをPRでデフォルトブランチへ取り込めば完了です。設定時にプロジェクトのコードやテストは実行しません。`npm test` がない場合は調査のみ有効にします。
 
-privateリポジトリでは、AIへの送信を許可したうえでActionsのRepository Variable **`AI_BOT_ALLOW_PRIVATE=true`** を追加します。Issue本文と許可したソースの一部をAIに送信します。
+既に導入済みなら `--upgrade --setup` を指定します。手動設定・必要なSecret名は[詳細ガイド](docs/guide.md#aiを選ぶ)を参照してください。
 
 ## セキュリティ修正PR
 

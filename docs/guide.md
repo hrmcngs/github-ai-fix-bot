@@ -6,6 +6,16 @@ GitHub上でIssueやDependabotアラートを調査し、日本語の修正方�
 
 [READMEに戻る](../README.md)
 
+## かんたん設定
+
+`gh auth login` の後、インストールコマンドの末尾に `| bash -s -- --setup` を指定します。既存Botの更新と再設定は `--upgrade --setup` です。Node.js 22以上と対話できるターミナルが必要です。標準入力がcurlのパイプでも、質問と非表示のキー入力は `/dev/tty` を使います。
+
+選択したAIと起動方法を設定し、APIキーをGitHub Secretsへ直接登録します。キーの空欄は既存Secretを保持します。Secret不足や権限不足は設定画面で確認してください。private送信は明示的な同意時のみ許可します。PR作成許可はGitHubではレビュー承認許可と共通のスイッチなので、別途確認します。Botはレビュー承認しません。
+
+ルートのpackage.jsonのスクリプト名だけを読み、checkがあれば `npm run check`、testがあれば `npm test` を検証コマンドにします。スクリプトは設定時には実行しません。testがない・既定の「no test specified」の場合はコード修正を無効にします。検証内容の十分さは人間が確認してください。代表的なソースディレクトリを追加し、Bot自身の修正許可と自動マージは無効にします。カスタム検証やmonorepoは差分を確認して手動で調整してください。
+
+Bot更新用のPATの発行だけはGitHub画面で行います。表示されたリンクから導入先限定・Contents / Pull requests / Workflowsの書込み権限で発行し、非表示の入力欄に貼り付けます。空欄なら登録を省略します。Botファイルのコミット・push・マージは自動実行しません。
+
 ## 導入
 
 対象のGitリポジトリ内で次のコマンドを実行します（git・curl・bashが必要）。
