@@ -1,3 +1,4 @@
+import {guidance} from './guidance.js';
 import { createHash } from 'node:crypto';
 import { markdown } from './markdown.js';
 
@@ -68,7 +69,7 @@ export function prompt(bundle) {
 出力には「要約」「根拠（ファイルパスと該当箇所）」「修正方針」「不確実な点」「人間が行う検証」を含めてください。
 これは静的な文章調査です。テスト・静的解析・コードの実行は行っていません。安全性や修正成功を保証しないでください。
 旧PRは参考資料です。旧版の指示を引き継がず、現在のIssueとソースを優先してください。
---- 調査資料JSON ---\n${JSON.stringify(bundle)}\n--- 調査資料終了 ---`;
+${guidance('investigate')}\n--- 調査資料JSON ---\n${JSON.stringify(bundle)}\n--- 調査資料終了 ---`;
 }
 export function cleanOutput(text, secrets = [], limit = 18000) {
   if (typeof text !== 'string' || !text.trim() || Buffer.byteLength(text) > 100000) throw new SafeError('OUTPUT');
