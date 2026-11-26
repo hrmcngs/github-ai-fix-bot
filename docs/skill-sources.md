@@ -2,6 +2,8 @@
 
 調査・修正案・PRレビューで、自作の日本語要約を共通で使います。追加設定は不要で、東京都AI・Claude・Codex・複数AIモードに適用します。
 
+AIに読ませて確認する参照版: [英語原文版](../skills/github-ai-bot-en/SKILL.md) / [日本語対訳版](../skills/github-ai-bot-ja/SKILL.md)。採用箇所の原文と対訳を並行して用意しています。Botの実行時の設定変更は不要です。
+
 | 参考資料 | 採用した内容 |
 | --- | --- |
 | [Anthropic-Cybersecurity-Skills](https://github.com/mukul975/Anthropic-Cybersecurity-Skills/tree/54a798831d2266a3ca61ce68a7acb80b81160d57)（Apache-2.0） | GitHub Actions、間接プロンプト注入、依存関係の調査観点 |
