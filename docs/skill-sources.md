@@ -7,4 +7,4 @@
 | [Anthropic-Cybersecurity-Skills](https://github.com/mukul975/Anthropic-Cybersecurity-Skills/tree/54a798831d2266a3ca61ce68a7acb80b81160d57)（Apache-2.0） | GitHub Actions、間接プロンプト注入、依存関係の調査観点 |
 | [andrej-karpathy-skills / CLAUDE.md](https://github.com/multica-ai/andrej-karpathy-skills/blob/2c606141936f1eeef17fa3043a72095b4765b9c2/CLAUDE.md) | 仮定の明示、単純な実装、最小の変更、検証できる成功条件 |
 
-参照先と版は `src/guidance.js` に固定しています。原文・実行スクリプトの転載や取得・実行は行いません。外部スキャナー、SBOM生成、検出モデルを導入したものではありません。これらの指針は回答を補助するもので、既存のパス・権限・検証制限を緩和しません。最初の資料はコミュニティ製で、Anthropic公式ではありません。
+参照先と版は `src/guidance.js` に固定しています。実行時に原文やスクリプトを取得・実行しません。原文の転載ではなく、関連する指針の要約です。外部スキャナー、SBOM生成、検出モデルを導入したものではありません。これらの指針は回答を補助するもので、既存のパス・権限・検証制限を緩和しません。最初の資料はコミュニティ製で、Anthropic公式ではありません。
