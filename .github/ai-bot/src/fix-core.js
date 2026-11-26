@@ -1,3 +1,4 @@
+import {guidance} from './guidance.js';
 import { createHash } from 'node:crypto';
 import { allowedPath, SafeError, scrub } from './core.js';
 
@@ -26,7 +27,7 @@ Issueの問題を根拠に修正してください。自信が低い・資料不
 ファイル削除、新規ファイル作成、無関係な変更は不可。最大3ファイル、各ファイル12000バイト、合計24000バイトまで。
 次のJSONだけを返してください。Markdownやコードフェンスは不要です。
 {"confidence":"high または low","summary":"根拠、修正内容、不確実な点を日本語で説明","changes":[{"path":"src/example.js","content":"修正後のファイル全文"}]}
---- 調査資料JSON ---\n${JSON.stringify({repository:bundle.repo,target:bundle.targets[0],context:bundle.context})}\n--- 資料終了 ---`;
+${guidance('fix')}\n--- 調査資料JSON ---\n${JSON.stringify({repository:bundle.repo,target:bundle.targets[0],context:bundle.context})}\n--- 資料終了 ---`;
 }
 export function editable(path, cfg) {
   return allowedPath(path,cfg) && /\.[cm]?js$/.test(path)

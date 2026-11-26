@@ -166,6 +166,7 @@ main() {
     .github/ai-bot/src/configure.js
     .github/ai-bot/src/bulk.js
     .github/ai-bot/src/updates.js
+    .github/ai-bot/src/guidance.js
     .github/ai-bot/src/core.js
     .github/ai-bot/src/commands.js
     .github/ai-bot/src/auto-merge.js
