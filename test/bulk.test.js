@@ -65,6 +65,12 @@ test('shared scheduling admission belongs to authorized jobs rather than untrust
     if(['fix','investigate'].includes(name)){
       assert.ok(text.includes('needs.select.outputs.ready'));assert.ok(text.includes('matrix.number'));
       assert.ok(text.includes('    concurrency:'));
+      if(name==='fix'){
+        // cancel-in-progress:false alone still replaces pending runs under GitHub's single-slot default.
+        assert.match(text,/^      queue: max$/m);
+        assert.match(text,/^      cancel-in-progress: false$/m);
+        assert.ok(text.includes('group: ai-fix-${{ github.repository }}-${{ matrix.kind }}-${{ matrix.number }}'));
+      }
     }
   }
 });
