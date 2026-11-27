@@ -87,7 +87,7 @@ test('fix publication rechecks slash command and rejects redirected Issue target
   await prepareFix(env,github('/ai-fix'));
   await writeFile('.work/fix-plan.json',JSON.stringify({ok:false,reason:'模擬API失敗'}));
   await writeFile('.work/fix-verdict.json',JSON.stringify({ok:false,reason:'模擬API失敗'}));
-  const gh=github('/ai-fix');await assert.rejects(publishFix(env,gh),e=>e.code==='VALIDATION');
+  const gh=github('/ai-fix');await assert.rejects(publishFix(env,gh),e=>e.code==='OUTPUT'&&e.phase==='generation');
   assert.ok(gh.calls.some(c=>c.method==='POST' && c.path==='/repos/a/b/issues/2/comments'));
   const denied=github('/ai-fix',{body:'cancelled'});await assert.rejects(publishFix(env,denied),e=>e.code==='ACCESS');
   assert.equal(denied.calls.filter(c=>c.method!=='GET').length,0);
@@ -103,13 +103,13 @@ test('fix replies follow each new command; rerunning one command updates only it
   await writeFile('.work/fix-verdict.json',JSON.stringify({ok:false,reason:'模擬失敗'}));
   const old={id:456,user:{login:'github-actions[bot]',type:'Bot'},body:'<!-- ai-fix:issue:2 -->\n古いラベル実行の結果'};
   const gh=github('/ai-fix');gh.list=async()=>[old];
-  await assert.rejects(publishFix(env,gh),e=>e.code==='VALIDATION');
+  await assert.rejects(publishFix(env,gh),e=>e.code==='OUTPUT'&&e.phase==='generation');
   const created=gh.calls.find(c=>c.method==='POST');
   assert.equal(created.path,'/repos/a/b/issues/2/comments');
   assert.ok(created.payload.body.startsWith('<!-- ai-fix:issue:2 --><!-- ai-command:123 -->'));
   const own={...old,id:789,body:created.payload.body};
   const rerun=github('/ai-fix');rerun.list=async()=>[old,own];
-  await assert.rejects(publishFix(env,rerun),e=>e.code==='VALIDATION');
+  await assert.rejects(publishFix(env,rerun),e=>e.code==='OUTPUT'&&e.phase==='generation');
   assert.equal(rerun.calls.find(c=>c.method==='PATCH').path,'/repos/a/b/issues/comments/789');
 }));
 test('reference options accept only exact standalone syntax and preserve live-comment authorization',async()=>{
