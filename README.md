@@ -46,7 +46,7 @@ PRに `/ai-fix` とコメントすると、競合の統合案を作成・検証�
 
 AIはActionsの `ai` 欄で選ぶか、`/ai-fix --ai claude` のように指定します。`--ai all` は登録済みAIの案をまとめます（最大4回のAPI利用・回答を統合担当AIへ送信）。調査・調査PR・PR競合修正でも使えます。
 
-**全件実行：** Actionsの **AI investigation** または **AI fix → Run workflow** で、番号を空欄にします。Dependabotは調査のみ対応します。
+**全件実行：** Actionsの **AI investigation** または **AI fix → Run workflow** で、番号を空欄にします。Dependabotは調査のみ対応します。 調査の `target=all` でDependabot一覧を取得できない場合は、未調査の警告を残してIssueだけを続行します。
 
 Issue本文を更新すると古いBot PRを閉じます。再実行時に旧PRを参照したい場合は `--reference`、参照しない場合は `--no-reference` を `/ai-fix` または `/ai-report-pr` に付けます。
 

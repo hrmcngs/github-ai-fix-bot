@@ -354,6 +354,10 @@ write以上の利用者がIssueのタイトル・本文を編集すると、`Ret
 
 手動一括実行の上限は1回256件です。超えた場合は切り捨てず停止します。Issueとアラートを分けるか、対象を整理して実行してください。待機中に一時APIキーの有効期限・上限に達した場合は安全なエラーとなり、修正を確定しません。新しいキーをSecretに登録して再実行できます。実行時間とActions利用枠は対象数に応じて増えます。
 
+調査の `target=all` でDependabot一覧へアクセスできない場合、取得済みのIssueだけを続行します。Actionsの警告とSummaryに「Dependabotは未調査」と表示し、アラートが0件だったとは扱いません。Issueが0件でも未調査の警告は残ります。`target=dependabot` の専用実行、Issue一覧自体の取得失敗、GitHub APIの一時障害はエラーとして報告します。Issueだけを使う場合は **AI investigation → Run workflow → target=issue** を選べます。
+
+Dependabotも調査する場合は、導入先のDependabot alertsを有効にし、Bot用ワークフローの `vulnerability-alerts: read` を確認してください（[GitHubの権限仕様](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions)）。古いActions定義が残っている導入先は、インストーラーの `--upgrade` で更新できます。
+
 ## Bot自体の更新PR
 
 追加トークン不要の **runtime（本体のみ）** を既定とします。**Bot update notices** が1時間ごと（毎時17分）に自動確認し、更新があれば専用ブランチからPRを作成します。最初の **AI investigation → Run workflow** の「Bot本体の更新PRも確認する」（既定ON）からも確認できます。このチェックを外すとその回の確認だけを省略し、1時間ごとの確認は継続します。調査と更新は別ジョブなので、AIのAPIキーが未登録でも更新の確認は可能です。リポジトリのActionsによるPR作成許可が必要です。
