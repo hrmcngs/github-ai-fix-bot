@@ -85,6 +85,24 @@ test('upstream downloads use a fixed host with no destination credentials and va
   f.source.request=async path=>path.startsWith('/git/blobs/')?{encoding:'base64',content:Buffer.from('tampered').toString('base64')}:original(path);
   await assert.rejects(release(f.source),e=>e.code==='UPDATE_SOURCE');
 });
+test('anonymous REST exhaustion falls back to fixed-source Git data and keeps commit binding',async()=>{
+  const f=sourceFixture(),blobs=new Map();
+  for(const content of Object.values(f.contents))blobs.set(gitHash(content),{encoding:'base64',content:Buffer.from(content).toString('base64')});
+  for(const status of [403,429]){
+    const refs=[],requests=[];
+    const source=new Upstream(async(url,options)=>{requests.push({url,options});return new Response('{}',{status,headers:{'x-ratelimit-remaining':'0'}});},async ref=>{refs.push(ref);return{commit:latest,tree:f.tree,blobs};});
+    assert.equal((await release(source,latest)).commit,latest);
+    assert.deepEqual(refs,[latest]);assert.equal(requests.length,1);
+    assert.equal(requests[0].options.headers.Authorization,undefined);
+    await assert.rejects(source.request('/../../evil'));
+    await assert.rejects(source.request(`/git/trees/${old}?recursive=1`));
+  }
+});
+test('ordinary source denial never invokes Git fallback',async()=>{
+  let fallback=0;
+  const source=new Upstream(async()=>new Response('{}',{status:403}),async()=>{fallback++;throw new Error();});
+  await assert.rejects(source.request('/commits/main'),e=>e.code==='UPDATE_SOURCE');assert.equal(fallback,0);
+});
 test('removed upstream files produce deletions only on the dedicated update branch',async()=>{
   const f=fixture(),obsolete='.github/ai-bot/src/obsolete.js';
   f.state.files[obsolete]=old;f.tree.push({path:obsolete,type:'blob',mode:'100644',sha:old});
