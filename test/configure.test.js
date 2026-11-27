@@ -1,9 +1,11 @@
-import test from 'node:test';
+import test,{beforeEach} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile,mkdtemp,mkdir,writeFile,symlink,rm} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {settings,configure} from '../.github/ai-bot/src/configure.js';
+// Capture application logs: raw non-ASCII stdout can corrupt Node 22 test-runner frames.
+beforeEach(t=>{t.mock.method(console,'log',()=>{});});
 const raw=JSON.parse(await readFile(new URL('../.github/ai-bot/config.json',import.meta.url),'utf8'));
 test('guided settings use script names without running them and disable privileged defaults',()=>{
   const next=settings(raw,{provider:'claude',mode:'automatic',scripts:{test:'some command',check:'any command'},sourcePaths:['frontend/']});

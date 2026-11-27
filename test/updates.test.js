@@ -1,10 +1,12 @@
-import test from 'node:test';
+import test,{beforeEach} from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFile,mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {SOURCE,STATE,MANIFEST,UPDATE_MARKER,manifest,installation,Upstream,release,scopedRelease,updateContext,updateError,checkUpdate,authorizeUpdate,updateFiles,applyUpdate,loadInstallation,authorizeAutomaticUpdate,updateStatus} from '../.github/ai-bot/src/updates.js';
+// Capture application logs: raw non-ASCII stdout can corrupt Node 22 test-runner frames.
+beforeEach(t=>{t.mock.method(console,'log',()=>{});});
 const old='a'.repeat(40),latest='b'.repeat(40),base='c'.repeat(40);
 const file='.github/ai-bot/src/main.js';
 const gitHash=content=>createHash('sha1').update(`blob ${Buffer.byteLength(content)}\0`).update(content).digest('hex');
