@@ -12,6 +12,7 @@ async function fixture(fn) {
   const dir=await mkdtemp(join(tmpdir(),'ai-bot-installer-'));
   const root=join(dir,'target with spaces'),bin=join(dir,'bin');
   await mkdir(root);await mkdir(join(root,'.git'));await mkdir(bin);await mkdir(join(dir,'home'));
+  await symlink(process.execPath,join(bin,'node'));
   await writeFile(join(bin,'git'),`#!${process.execPath}
 const fs=require('node:fs'),crypto=require('node:crypto'),path=require('node:path'),args=process.argv.slice(2);
 if(args[0]==='hash-object'){
@@ -151,4 +152,50 @@ test('installer creates missing labels without changing existing labels or enabl
   const writes=calls.filter(c=>c.includes('POST'));assert.equal(writes.length,3);
   for(const label of ['ai-fix','ai-investigate','ai-auto-merge'])assert.ok(writes.some(c=>c.includes('name='+label)));
   assert.ok(calls.every(c=>!c.includes('PATCH')&&!c.includes('PUT')));
+}));
+
+test('uninstall backs up modified Bot files and config, keeping unrelated files and remote settings',()=>fixture(async({root,dir,run})=>{
+  assert.equal(run().status,0);
+  await writeFile(join(root,'.github/ai-bot/src/core.js'),'my modified bot');
+  await writeFile(join(root,'.github/ai-bot/config.json'),'my configuration');
+  await writeFile(join(root,'.github/ai-bot/notes.md'),'keep unknown file');
+  await writeFile(join(root,'.github/workflows/project.yml'),'project workflow');
+  await mkdir(join(root,'reports/ai'),{recursive:true});
+  await writeFile(join(root,'reports/ai/issue-2.md'),'keep report');
+  const result=run({},['--uninstall']);assert.equal(result.status,0,result.stderr);
+  const backup=result.stdout.match(/^Backup: (.+)$/m)?.[1];assert.ok(backup.startsWith(join(root,'.git/ai-bot-backups/')));
+  assert.equal(await readFile(join(backup,'.github/ai-bot/src/core.js'),'utf8'),'my modified bot');
+  assert.equal(await readFile(join(backup,'.github/ai-bot/config.json'),'utf8'),'my configuration');
+  await assert.rejects(access(join(root,'.github/workflows/fix.yml')));
+  await assert.rejects(access(join(root,'.github/ai-bot/installation.json')));
+  assert.equal(await readFile(join(root,'.github/ai-bot/notes.md'),'utf8'),'keep unknown file');
+  assert.equal(await readFile(join(root,'.github/workflows/project.yml'),'utf8'),'project workflow');
+  assert.equal(await readFile(join(root,'reports/ai/issue-2.md'),'utf8'),'keep report');
+  await assert.rejects(access(join(dir,'gh-calls.jsonl')));
+  assert.equal(run({},['--uninstall']).status,0);
+}));
+test('uninstall rejects forged ownership and symlinked files before any deletion',()=>fixture(async({root,dir,run})=>{
+  assert.equal(run().status,0);
+  const statePath=join(root,'.github/ai-bot/installation.json'),original=await readFile(statePath,'utf8');
+  const state=JSON.parse(original);state.files['package.json']='a'.repeat(40);await writeFile(statePath,JSON.stringify(state));
+  let result=run({},['--uninstall']);assert.notEqual(result.status,0);assert.match(result.stderr,/Invalid installation record/);
+  await access(join(root,'.github/workflows/fix.yml'));
+  await writeFile(statePath,original);
+  const external=join(dir,'external');await writeFile(external,'do not remove');
+  const botFile=join(root,'.github/ai-bot/src/core.js');await rm(botFile);await symlink(external,botFile);
+  result=run({},['--uninstall']);assert.notEqual(result.status,0);assert.match(result.stderr,/Unsafe file/);
+  await access(join(root,'.github/workflows/fix.yml'));
+  assert.equal(await readFile(external,'utf8'),'do not remove');
+}));
+test('uninstall rejects unsafe backup directories before removing files',()=>fixture(async({root,dir,run})=>{
+  assert.equal(run().status,0);
+  const external=join(dir,'backups');await mkdir(external);await symlink(external,join(root,'.git/ai-bot-backups'));
+  const result=run({},['--uninstall']);assert.notEqual(result.status,0);assert.match(result.stderr,/Unsafe backup directory/);
+  await access(join(root,'.github/workflows/fix.yml'));await access(join(root,'.github/ai-bot/config.json'));
+}));
+test('uninstall does not need downloads and refuses incompatible installation options',()=>fixture(async({root,run})=>{
+  assert.equal(run().status,0);
+  assert.notEqual(run({},['--uninstall','--setup']).status,0);
+  await access(join(root,'.github/ai-bot/installation.json'));
+  assert.equal(run({FAIL_DOWNLOAD:'.github/ai-bot/src/core.js'},['--uninstall']).status,0);
 }));

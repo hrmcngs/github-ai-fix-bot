@@ -5,12 +5,15 @@ set -euo pipefail
 usage() {
   cat <<'HELP'
 Usage: bash install.sh [--directory PATH] [--ref COMMIT_SHA] [--upgrade] [--skip-security-updates] [--setup]
+       bash install.sh --uninstall [--directory PATH]
 
 Installs .github/ai-bot/ and the investigation/fix workflows.
 Default destination: root of the current Git repository.
 Default source: hrmcngs/github-ai-fix-bot main, resolved once to a commit.
 Existing config.json is preserved unless --setup explicitly configures it. Differing Bot files stop installation by default.
 --upgrade backs up replaced Bot files inside Git metadata, then installs the selected version.
+--uninstall backs up and removes recorded Bot files and config locally (requires Node.js).
+Secrets, labels, reports, PRs and Dependabot settings are kept. Review and commit the deletions.
 Enables Dependabot alerts/security update PRs using an authenticated GitHub CLI admin session.
 --skip-security-updates leaves repository security settings unchanged.
 --setup opens a Japanese guided setup (requires Node.js 22+, gh and a terminal).
@@ -18,6 +21,59 @@ No keys are requested, and no commits, pushes or Actions runs are performed.
 HELP
 }
 fail() { printf 'Error: %s\n' "$*" >&2; exit 1; }
+
+uninstall_bot() {
+  local root=$1 git_dir=''
+  shift
+  command -v node >/dev/null 2>&1 || fail 'アンインストールにはNode.jsが必要です。'
+  git_dir=$(git -C "$root" rev-parse --absolute-git-dir) || fail 'Could not locate Git metadata'
+  node - "$root" "$git_dir" "$@" <<'NODE'
+const fs=require('node:fs'),path=require('node:path');
+const [root,gitDir,...allowed]=process.argv.slice(2);
+const statePath='.github/ai-bot/installation.json',configPath='.github/ai-bot/config.json';
+const exists=p=>{try{return fs.lstatSync(p);}catch(e){if(e.code==='ENOENT')return null;throw e;}};
+function directories(base,relative){
+  let current=base;
+  for(const part of relative.split('/').slice(0,-1)){
+    current=path.join(current,part);const stat=exists(current);
+    if(stat&&(!stat.isDirectory()||stat.isSymbolicLink()))throw new Error('Unsafe directory: '+relative);
+  }
+}
+try{
+  directories(root,statePath);
+  const stateFile=exists(path.join(root,statePath));
+  if(!stateFile){console.log('Botの導入記録がありません。ファイルは削除していません。');process.exit(0);}
+  if(!stateFile.isFile()||stateFile.isSymbolicLink())throw new Error('Invalid installation record');
+  if(stateFile.size>64000)throw new Error('Invalid installation record');
+  const state=JSON.parse(fs.readFileSync(path.join(root,statePath),'utf8'));
+  if(state.version!==1||state.source!=='hrmcngs/github-ai-fix-bot'||!state.files||typeof state.files!=='object'||Array.isArray(state.files)||Object.keys(state.files).length>60
+    ||Object.entries(state.files).some(([p,h])=>!allowed.includes(p)||typeof h!=='string'||!/^[a-f0-9]{40}$/.test(h)))throw new Error('Invalid installation record; no files removed');
+  const files=[...new Set([...Object.keys(state.files),configPath,statePath])].filter(relative=>{
+    directories(root,relative);const stat=exists(path.join(root,relative));
+    if(stat&&(!stat.isFile()||stat.isSymbolicLink()))throw new Error('Unsafe file: '+relative);
+    return !!stat;
+  });
+  if(!path.isAbsolute(gitDir)||!fs.lstatSync(gitDir).isDirectory()||fs.lstatSync(gitDir).isSymbolicLink())throw new Error('Invalid Git metadata');
+  const backups=path.join(gitDir,'ai-bot-backups'),existing=exists(backups);
+  if(existing&&(!existing.isDirectory()||existing.isSymbolicLink()))throw new Error('Unsafe backup directory');
+  fs.mkdirSync(backups,{recursive:true,mode:0o700});
+  const backup=fs.mkdtempSync(path.join(backups,'uninstall.'));fs.chmodSync(backup,0o700);
+  // Complete and verify every backup before deleting anything. No shell or repository code runs.
+  for(const relative of files){
+    const target=path.join(backup,relative);fs.mkdirSync(path.dirname(target),{recursive:true,mode:0o700});
+    fs.copyFileSync(path.join(root,relative),target,fs.constants.COPYFILE_EXCL);fs.chmodSync(target,0o600);
+    if(!fs.readFileSync(target).equals(fs.readFileSync(path.join(root,relative))))throw new Error('Backup verification failed');
+  }
+  console.log('Backup: '+backup);
+  for(const relative of files){fs.unlinkSync(path.join(root,relative));console.log('Removed: '+relative);}
+  for(const relative of ['.github/ai-bot/src','.github/ai-bot','.github/workflows','.github']){
+    try{fs.rmdirSync(path.join(root,relative));}catch(e){if(!['ENOENT','ENOTEMPTY','EEXIST'].includes(e.code))throw e;}
+  }
+  console.log('Botファイルを削除しました。git diffで確認し、削除をコミットしてください。');
+  console.log('Secrets・ラベル・調査レポート・PR・Dependabot設定は残しています。');
+}catch(error){console.error('Error: '+error.message);process.exitCode=1;}
+NODE
+}
 
 ensure_bot_labels() {
   local root=$1 origin='' repo='' label='' names='ai-fix ai-investigate ai-auto-merge'
@@ -151,7 +207,7 @@ guided_setup() {
 }
 
 main() {
-  local destination='' commit='' remote_ref='' root='' relative='' parent='' upgrade=false setup=false security_updates=true backup='' git_dir='' pending='' replace_count=0
+  local destination='' commit='' remote_ref='' root='' relative='' parent='' upgrade=false setup=false uninstall=false security_updates=true backup='' git_dir='' pending='' replace_count=0
   local -a replaced=()
   local -a files=(
     .github/ai-bot/.dockerignore
@@ -194,6 +250,7 @@ main() {
   while (($#)); do
     case "$1" in
       --upgrade) upgrade=true; shift ;;
+      --uninstall) uninstall=true; shift ;;
       --setup) setup=true; shift ;;
       --skip-security-updates) security_updates=false; shift ;;
       --directory) (($# >= 2)) || fail '--directory requires a path'; destination=$2; shift 2 ;;
@@ -203,6 +260,13 @@ main() {
     esac
   done
   command -v git >/dev/null 2>&1 || fail 'git is required'
+  if [[ "$uninstall" == true ]]; then
+    [[ "$upgrade" == false && "$setup" == false && -z "$commit" ]] || fail '--uninstall cannot be combined with --upgrade, --setup or --ref'
+    root=$(git -C "${destination:-.}" rev-parse --show-toplevel 2>/dev/null) || fail 'Run inside a Git working tree, or specify --directory PATH'
+    root=$(cd "$root" && pwd -P)
+    uninstall_bot "$root" "${files[@]}"
+    return
+  fi
   command -v curl >/dev/null 2>&1 || fail 'curl is required'
   if [[ "$setup" == true ]]; then
     command -v gh >/dev/null 2>&1 || fail 'GitHub CLIが必要です。ghをインストールし、gh auth login を実行してください。'
