@@ -158,3 +158,38 @@ test('updated Issue bypasses an old proposal and includes its allowed patch as r
   assert.equal(prepared.context.previousProposals[0].number,8);
   assert.equal(prepared.targets[0].revision,issueTarget(issue).revision);
 }));
+
+test('invalid AI output stops before validation and stays a generation error through publication',()=>fixture(async({env})=>{
+  env.AI_API_KEY='fixture-only-key';
+  for(const answer of ['not JSON',JSON.stringify({...plan(),changes:[{path:'.github/workflows/fix.yml',content:'permissions: write-all'}]})]){
+    await artifacts();await generateFix(env,{tokyo:async()=>answer});
+    const generated=JSON.parse(await readFile('.work/fix-plan.json'));
+    assert.equal(generated.ok,false);assert.equal(generated.code,'OUTPUT');
+    assert.match(generated.reason,/修正案の生成に失敗/);assert.match(generated.reason,/テストは実行していません/);
+    await validateFix(env,{run:async()=>assert.fail('Invalid output must not run Docker'),git:async()=>assert.fail('Invalid output must not archive source')});
+    const verdict=JSON.parse(await readFile('.work/fix-verdict.json'));
+    assert.equal(verdict.code,'OUTPUT');assert.equal(verdict.stage,'generation');
+    const gh=github();
+    await assert.rejects(publishFix(env,gh),e=>e.code==='OUTPUT'&&e.phase==='generation');
+    const writes=gh.calls.filter(c=>c.method!=='GET');assert.equal(writes.length,1);
+    assert.ok(writes[0].path.endsWith('/issues/2/comments'));
+    assert.match(writes[0].body.body,/修正案の生成に失敗/);
+    assert.ok(!writes[0].body.body.includes('オフライン環境での構文チェックまたは指定した検証が失敗'));
+  }
+}));
+test('provider failure categories survive generation, skipped validation and publication without raw errors',()=>fixture(async({env})=>{
+  env.AI_API_KEY='fixture-only-key';
+  for(const code of ['AUTH','LIMIT','NETWORK','RUNTIME','CONFIG']){
+    await artifacts();await generateFix(env,{tokyo:async()=>{const e=new SafeError(code);e.message='dummy-provider-secret';throw e;}});
+    await validateFix(env,{run:async()=>assert.fail('Failed generation must not run tests')});
+    assert.equal(JSON.parse(await readFile('.work/fix-verdict.json')).code,code);
+    const gh=github();await assert.rejects(publishFix(env,gh),e=>e.code===code&&e.phase==='generation');
+    const text=JSON.stringify(gh.calls);assert.ok(!text.includes('dummy-provider-secret'));assert.ok(!text.includes('fixture-only-key'));
+    assert.ok(!gh.calls.some(c=>c.method!=='GET'&&!c.path.endsWith('/issues/2/comments')));
+  }
+}));
+test('legacy failed-generation artifacts without a code do not become test failures',()=>fixture(async({env})=>{
+  await artifacts();await writeFile('.work/fix-plan.json',JSON.stringify({ok:false,reason:'AIから有効な調査結果を取得できませんでした。'}));
+  await writeFile('.work/fix-verdict.json',JSON.stringify({ok:false,reason:'AIから有効な調査結果を取得できませんでした。'}));
+  await assert.rejects(publishFix(env,github()),e=>e.code==='OUTPUT'&&e.phase==='generation');
+}));
