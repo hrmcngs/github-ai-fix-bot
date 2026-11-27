@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test,{beforeEach} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile,mkdtemp,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -6,6 +6,8 @@ import {join} from 'node:path';
 import {issueRevision,revisionMarker,sameRevision,currentProposal,previousProposals,previousLinks,closeOutdated,updateProposals} from '../.github/ai-bot/src/proposal-state.js';
 import {issueTarget} from '../.github/ai-bot/src/main.js';
 import {fixPrompt} from '../.github/ai-bot/src/fix-core.js';
+// Capture application logs: raw non-ASCII stdout can corrupt Node 22 test-runner frames.
+beforeEach(t=>{t.mock.method(console,'log',()=>{});});
 const cfg=JSON.parse(await readFile(new URL('../.github/ai-bot/config.json',import.meta.url)));
 const issue={number:2,state:'open',title:'Current request',body:'Fix addition'};
 function proposal(n=9,kind='fix',version={...issue,body:'Old request'}){

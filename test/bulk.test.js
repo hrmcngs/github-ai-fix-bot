@@ -1,10 +1,12 @@
-import test from 'node:test';
+import test,{beforeEach} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile,writeFile,mkdir,mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {SafeError} from '../.github/ai-bot/src/core.js';
 import {select,selectTargets,workerEvent,selectionError} from '../.github/ai-bot/src/bulk.js';
+// Capture application logs: raw non-ASCII stdout can corrupt Node 22 test-runner frames.
+beforeEach(t=>{t.mock.method(console,'log',()=>{});});
 const cfg=JSON.parse(await readFile(new URL('../.github/ai-bot/config.json',import.meta.url)));
 const env={GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_REF:'refs/heads/main',GITHUB_ACTOR:'owner'};
 const event={repository:{full_name:'a/b'},inputs:{target:'all',number:''}};
