@@ -211,3 +211,29 @@ test('update entry validates repository and ref separately and reports only safe
   assert.ok(updateError({code:'UPDATE_BRANCH'}).includes('デフォルトブランチ'));
   assert.ok(!updateError(new Error('secret-api-key')).includes('secret-api-key'));
 });
+
+test('automatic runtime detection and PR creation need no AI secrets, provider configuration or model execution',async()=>{
+  const original=process.cwd(),dir=await mkdtemp(join(tmpdir(),'ai-free-update-'));
+  try{
+    process.chdir(dir);const f=fixture();
+    const env={...automatic(f),AI_BOT_UPDATE_SCOPE:'runtime'};
+    for(const name of ['AI_API_KEY','TOKYO_AI_API_KEY','ANTHROPIC_API_KEY','OPENAI_API_KEY','AI_BOT_UPDATE_TOKEN'])assert.equal(env[name],undefined);
+    assert.deepEqual(await checkUpdate(f.gh,f.state,f.source,'runtime'),{commit:latest});
+    await applyUpdate(f.gh,null,{repository:{full_name:'a/b'}},env,f.state,f.source);
+    const pr=f.gh.calls.find(c=>c.method==='POST'&&c.p.endsWith('/pulls'));assert.ok(pr);
+    assert.match(pr.body.body,/AI使用: なし/);
+    await assert.rejects(readFile('.github/ai-bot/config.json'),e=>e.code==='ENOENT');
+    assert.ok(f.source.calls.every(p=>/^\/(commits\/main|git\/(trees|blobs)\/[a-f0-9]{40})/.test(p)));
+  }finally{process.chdir(original);await rm(dir,{recursive:true,force:true});}
+});
+test('update workflows do not receive AI keys and update-only bypasses investigation selection',async()=>{
+  const updates=await readFile(new URL('../.github/workflows/bot-updates.yml',import.meta.url),'utf8');
+  assert.ok(updates.includes('schedule:'));assert.ok(updates.includes('updates.js check'));assert.ok(updates.includes('updates.js apply'));
+  assert.ok(!/TOKYO_AI_API_KEY|ANTHROPIC_API_KEY|OPENAI_API_KEY|\bAI_API_KEY\b|providers\.js|fix\.js|main\.js/.test(updates));
+  const investigate=await readFile(new URL('../.github/workflows/investigate.yml',import.meta.url),'utf8');
+  const updateJob=investigate.slice(investigate.indexOf('  bot-updates:'),investigate.indexOf('  select:'));
+  const selectJob=investigate.slice(investigate.indexOf('  select:'),investigate.indexOf('  run:'));
+  assert.ok(updateJob.includes("inputs.operation == 'update-only' || inputs.check_bot_updates"));
+  assert.ok(!/secrets:|AI_API_KEY/.test(updateJob));
+  assert.ok(selectJob.includes("inputs.operation != 'update-only'"));
+});

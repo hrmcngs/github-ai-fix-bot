@@ -132,3 +132,28 @@ test('selector persists incomplete coverage in the Actions summary and emits a v
     assert.ok(lines.some(x=>x.startsWith('::warning::')&&x.includes('Dependabotは未調査')));
   }finally{console.log=log;process.chdir(original);await rm(dir,{recursive:true,force:true});}
 });
+
+test('manual update-only never selects AI work or reads repository metadata or AI configuration',async()=>{
+  const gh={repo:'a/b',request:async()=>assert.fail('No AI selection API calls'),list:async()=>assert.fail('No Issue or alert reads')};
+  const updateEvent={...event,inputs:{operation:'update-only',target:'all',number:''}};
+  assert.deepEqual(await selectTargets(gh,updateEvent,env,undefined,'investigate'),[]);
+  await assert.rejects(selectTargets(gh,{...event,inputs:{operation:'unknown'}},env,undefined,'investigate'),e=>e.code==='CONFIG');
+  const original=process.cwd(),dir=await mkdtemp(join(tmpdir(),'ai-update-only-'));
+  try{
+    await writeFile(join(dir,'event.json'),JSON.stringify(updateEvent));process.chdir(dir);
+    for(const configText of [undefined,'invalid AI configuration']){
+      if(configText!==undefined){await mkdir('.github/ai-bot',{recursive:true});await writeFile('.github/ai-bot/config.json',configText);}
+      const local={...env,GITHUB_EVENT_PATH:join(dir,'event.json'),GITHUB_OUTPUT:join(dir,'output'),GITHUB_STEP_SUMMARY:join(dir,'summary')};
+      await writeFile(local.GITHUB_OUTPUT,'');await writeFile(local.GITHUB_STEP_SUMMARY,'');
+      await select(local,gh);
+      assert.equal(await readFile(local.GITHUB_OUTPUT,'utf8'),'ready=false\nmatrix={"include":[]}\n');
+      assert.match(await readFile(local.GITHUB_STEP_SUMMARY,'utf8'),/AI調査は起動しません/);
+    }
+  }finally{process.chdir(original);await rm(dir,{recursive:true,force:true});}
+});
+test('update-only is limited to manual investigation routing and does not disable ordinary fix or scheduled analysis',async()=>{
+  const updateEvent={...event,inputs:{operation:'update-only'}},issues=[{number:1,state:'open'}];
+  assert.deepEqual(await selectTargets(github({issues}),updateEvent,env,cfg,'fix'),[{kind:'issue',number:'1'}]);
+  assert.deepEqual(await selectTargets(github(),updateEvent,{...env,GITHUB_EVENT_NAME:'schedule'},{...cfg,mode:'automatic'},'investigate'),[{kind:'dependabot',number:'schedule'}]);
+  assert.deepEqual(await selectTargets(github({issues}),{...event,inputs:{operation:'investigate',target:'issue'}},env,cfg,'investigate'),[{kind:'issue',number:'1'}]);
+});

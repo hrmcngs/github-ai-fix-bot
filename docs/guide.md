@@ -360,7 +360,11 @@ Dependabotも調査する場合は、導入先のDependabot alertsを有効に�
 
 ## Bot自体の更新PR
 
-追加トークン不要の **runtime（本体のみ）** を既定とします。**Bot update notices** が1時間ごと（毎時17分）に自動確認し、更新があれば専用ブランチからPRを作成します。最初の **AI investigation → Run workflow** の「Bot本体の更新PRも確認する」（既定ON）からも確認できます。このチェックを外すとその回の確認だけを省略し、1時間ごとの確認は継続します。調査と更新は別ジョブなので、AIのAPIキーが未登録でも更新の確認は可能です。リポジトリのActionsによるPR作成許可が必要です。
+追加トークン不要の **runtime（本体のみ）** を既定とします。**Bot update notices** が1時間ごと（毎時17分）に自動確認し、更新があれば専用ブランチからPRを作成します。GitHub APIと `GITHUB_TOKEN` だけを使い、AI APIの呼び出し・利用回数の消費・AIキーの登録は不要です。リポジトリのActionsによるPR作成許可が必要です。
+
+手動で更新だけ確認する場合は、**AI investigation → Run workflow → operation=update-only**、または **Bot update notices → Run workflow → scope=runtime** を選びます。`update-only` は対象取得とAI調査を起動せず、AI設定ファイルが未設定・不正でも更新処理と切り離します。選択肢が出ない導入先では、インストーラーの `--upgrade` でActions定義も更新してください。
+
+`operation=investigate` は従来どおりAI調査を実行します。この場合の「Bot本体の更新PRも確認する」（既定ON）は調査と更新の両方を起動する指定です。チェックを外しても1時間ごとの更新確認は継続します。
 
 runtimeでは `GITHUB_TOKEN` の contents/write・pull-requests/write をPR作成ジョブにだけ与えます。AIキーや追加PATを使用しません。`config.json`、アプリのソース、`.github/workflows/` は変更しません。既存ファイルのハッシュを照合し、独自変更や競合があれば停止します。上流コードは実行せず、人間のレビュー後にマージします。
 
