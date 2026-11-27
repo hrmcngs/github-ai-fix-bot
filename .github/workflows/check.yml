@@ -17,6 +17,8 @@ jobs:
           node-version: '22'
       - run: npm run check
       - run: npm test
+      - name: Check anonymous Bot distribution without AI keys
+        run: node scripts/smoke-update-source.mjs
   cli-smoke:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
