@@ -64,6 +64,16 @@ curl -fsSL https://raw.githubusercontent.com/hrmcngs/github-ai-fix-bot/main/inst
 
 Actions定義は手動更新です。必要なファイルを更新PRに記載します。全体更新を手動起動する場合だけ、追加トークンと `scope=full` が必要です。[更新の詳細](docs/guide.md#bot自体の更新pr)
 
+## 削除
+
+対象リポジトリ内で実行します（Node.jsが必要）。Botの導入記録にあるファイルと設定をバックアップして削除します。
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/hrmcngs/github-ai-fix-bot/main/install.sh | bash -s -- --uninstall
+```
+
+`git diff` を確認し、削除をコミットしてください。Secrets・ラベル・レポート・Dependabot設定は残ります。
+
 ## 注意点
 
 - APIキーはSecretsにだけ保存してください。東京都AIの一時キーは期限切れ時に更新し、新しい実行を開始します。
