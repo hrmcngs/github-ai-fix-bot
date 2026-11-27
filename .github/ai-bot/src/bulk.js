@@ -4,6 +4,8 @@ import {GitHub,botOwned} from './github.js';
 import {config,number,SafeError,messages} from './core.js';
 import {isCommand,requireCommand} from './commands.js';
 
+const updateOnly=(event,env,mode)=>mode==='investigate'&&env.GITHUB_EVENT_NAME==='workflow_dispatch'&&event.inputs?.operation==='update-only';
+
 // Reusable workers receive routing from the trusted selector, never from AI output.
 export function workerEvent(env,event){
   if(env.GITHUB_EVENT_NAME!=='workflow_dispatch'||env.AI_BOT_WORKER!=='true')return event;
@@ -13,7 +15,9 @@ export function workerEvent(env,event){
 export async function selectTargets(gh,event,env,cfg,mode,onWarning){
   if(!['fix','investigate'].includes(mode))throw new SafeError('CONFIG');
   if(event.repository?.full_name!==gh.repo)throw new SafeError('ACCESS');
+  if(updateOnly(event,env,mode))return [];
   const trigger=env.GITHUB_EVENT_NAME;
+  if(mode==='investigate'&&trigger==='workflow_dispatch'&&event.inputs?.operation!==undefined&&!['investigate','update-only'].includes(event.inputs.operation))throw new SafeError('CONFIG');
   if(trigger==='issue_comment'&&!isCommand(event,env,mode==='fix'?'/ai-fix':'/ai-investigate',mode==='fix')
     &&!(mode==='investigate'&&isCommand(event,env,'/ai-report-pr')))return [];
   const repo=await gh.request(gh.path());
@@ -65,12 +69,14 @@ export async function selectTargets(gh,event,env,cfg,mode,onWarning){
 export async function select(env=process.env,ghArg){
   const gh=ghArg||new GitHub(env.GITHUB_REPOSITORY,env.GH_TOKEN);
   const event=JSON.parse(await readFile(env.GITHUB_EVENT_PATH,'utf8'));
-  const cfg=config(JSON.parse(await readFile('.github/ai-bot/config.json','utf8')));
+  const mode=process.argv[2]==='scan-fix'?'fix':'investigate';
+  const onlyUpdate=updateOnly(event,env,mode);
+  const cfg=onlyUpdate?undefined:config(JSON.parse(await readFile('.github/ai-bot/config.json','utf8')));
   const warnings=[];
-  const targets=await selectTargets(gh,event,env,cfg,process.argv[2]==='scan-fix'?'fix':'investigate',warning=>warnings.push(warning));
+  const targets=await selectTargets(gh,event,env,cfg,mode,warning=>warnings.push(warning));
   if(env.GITHUB_OUTPUT)await appendFile(env.GITHUB_OUTPUT,`ready=${targets.length>0}\nmatrix=${JSON.stringify({include:targets})}\n`);
   for(const warning of warnings)console.log(`::warning::${warning}`);
-  const text=(warnings.length?`警告：一部の対象は未調査です。\n\n${warnings.join('\n\n')}\n\n`:'')+`起動対象: ${targets.length}件。各対象を個別に処理し、検証失敗時は修正PRを作成しません。`;
+  const text=onlyUpdate?'Bot更新のみを選択したため、AI調査は起動しません。Bot更新ジョブの結果を確認してください。':(warnings.length?`警告：一部の対象は未調査です。\n\n${warnings.join('\n\n')}\n\n`:'')+`起動対象: ${targets.length}件。各対象を個別に処理し、検証失敗時は修正PRを作成しません。`;
   console.log(text);if(env.GITHUB_STEP_SUMMARY)await appendFile(env.GITHUB_STEP_SUMMARY,text+'\n');
 }
 // Report known failure categories without exposing inputs or API response bodies.
