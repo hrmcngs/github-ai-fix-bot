@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {readFile} from 'node:fs/promises';
-import {selectTargets,workerEvent,selectionError} from '../.github/ai-bot/src/bulk.js';
+import {readFile,writeFile,mkdir,mkdtemp,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {SafeError} from '../.github/ai-bot/src/core.js';
+import {select,selectTargets,workerEvent,selectionError} from '../.github/ai-bot/src/bulk.js';
 const cfg=JSON.parse(await readFile(new URL('../.github/ai-bot/config.json',import.meta.url)));
 const env={GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_REF:'refs/heads/main',GITHUB_ACTOR:'owner'};
 const event={repository:{full_name:'a/b'},inputs:{target:'all',number:''}};
@@ -9,7 +12,7 @@ function github({issues=[],alerts=[],permission='write',privateRepo=false,alertF
   const calls=[];return{repo:'a/b',calls,path:(p='')=>`/repos/a/b${p}`,request:async p=>{
     calls.push(p);if(p==='/repos/a/b')return{default_branch:'main',private:privateRepo};
     if(p.includes('/permission'))return{permission};throw new Error('Unexpected route');
-  },list:async p=>{calls.push(p);if(p.includes('/dependabot/')){if(alertFailure)throw new Error('Forbidden');return alerts;}return issues;}};
+  },list:async p=>{calls.push(p);if(p.includes('/dependabot/')){if(alertFailure)throw new SafeError('ACCESS');return alerts;}return issues;}};
 }
 test('blank number selects all open Issues and alerts but excludes PRs and Bot housekeeping',async()=>{
   const gh=github({issues:[{number:1,state:'open'},{number:2,state:'open',pull_request:{}},{number:3,state:'closed'},{number:4,state:'open',user:{type:'Bot',login:'github-actions[bot]'}}],alerts:[{number:8,state:'open'},{number:9,state:'dismissed'}]});
@@ -83,4 +86,49 @@ test('selection reports safe, actionable reasons for invalid inputs and unavaila
   await assert.rejects(selectTargets(github({alertFailure:true}),event,env,cfg,'investigate'),e=>e.code==='BULK_ALERTS');
   assert.ok(selectionError({code:'BULK_ALERTS'}).includes('target=issue'));
   assert.ok(!selectionError({message:'secret-api-key'}).includes('secret-api-key'));
+});
+
+test('all-target access failures keep Issues only when missing Dependabot coverage is explicitly reported',async()=>{
+  for(const issues of [[],[{number:1,state:'open'},{number:2,state:'open',pull_request:{}}]]){
+    const warnings=[],gh=github({issues,alertFailure:true});
+    const targets=await selectTargets(gh,event,env,cfg,'investigate',warning=>warnings.push(warning));
+    assert.deepEqual(targets,issues.length?[{kind:'issue',number:'1'}]:[]);
+    assert.equal(warnings.length,1);assert.match(warnings[0],/Dependabotは未調査/);assert.match(warnings[0],/target=dependabot/);
+    assert.ok(!targets.some(t=>t.kind==='dependabot'));
+  }
+  const warnings=[];
+  await assert.rejects(selectTargets(github({alertFailure:true}),{...event,inputs:{target:'dependabot'}},env,cfg,'investigate',w=>warnings.push(w)),e=>e.code==='BULK_ALERTS');
+  assert.equal(warnings.length,0);
+});
+test('partial selection does not hide API outages, Issue-list failures, access controls or the matrix cap',async()=>{
+  const warn=()=>assert.fail('These failures must not become partial success');
+  const unavailable=github();unavailable.list=async p=>{if(p.includes('/dependabot/'))throw new SafeError('API_UNAVAILABLE');return[];};
+  await assert.rejects(selectTargets(unavailable,event,env,cfg,'investigate',warn),e=>e.code==='API_UNAVAILABLE');
+  const issues=github();issues.list=async()=>{throw new SafeError('ACCESS');};
+  await assert.rejects(selectTargets(issues,event,env,cfg,'investigate',warn),e=>e.code==='BULK_ISSUES');
+  for(const options of [{permission:'read'},{privateRepo:true}])await assert.rejects(selectTargets(github(options),event,env,cfg,'investigate',warn));
+  const many=github({issues:Array.from({length:257},(_,i)=>({number:i+1,state:'open'}))});
+  await assert.rejects(selectTargets(many,event,env,cfg,'investigate',warn),e=>e.code==='BULK_LIMIT');
+  const onlyIssues=github({alertFailure:true,issues:[{number:1,state:'open'}]});
+  assert.deepEqual(await selectTargets(onlyIssues,{...event,inputs:{target:'issue'}},env,cfg,'investigate',warn),[{kind:'issue',number:'1'}]);
+  assert.ok(!onlyIssues.calls.some(p=>p.includes('/dependabot/')));
+});
+test('selector persists incomplete coverage in the Actions summary and emits a visible warning',async()=>{
+  const original=process.cwd(),dir=await mkdtemp(join(tmpdir(),'ai-partial-scan-')),log=console.log,lines=[];
+  try{
+    await mkdir(join(dir,'.github/ai-bot'),{recursive:true});
+    await writeFile(join(dir,'.github/ai-bot/config.json'),JSON.stringify(cfg));
+    await writeFile(join(dir,'event.json'),JSON.stringify(event));process.chdir(dir);console.log=line=>lines.push(line);
+    for(const issues of [[],[{number:1,state:'open'}]]){
+      const local={...env,GITHUB_EVENT_PATH:join(dir,'event.json'),GITHUB_OUTPUT:join(dir,'output'),GITHUB_STEP_SUMMARY:join(dir,'summary')};
+      await writeFile(local.GITHUB_OUTPUT,'');await writeFile(local.GITHUB_STEP_SUMMARY,'');
+      await select(local,github({issues,alertFailure:true}));
+      const output=await readFile(local.GITHUB_OUTPUT,'utf8'),summary=await readFile(local.GITHUB_STEP_SUMMARY,'utf8');
+      assert.ok(output.includes(`ready=${issues.length>0}`));
+      const matrix=JSON.parse(output.split('\n').find(x=>x.startsWith('matrix=')).slice(7));
+      assert.deepEqual(matrix.include,issues.length?[{kind:'issue',number:'1'}]:[]);
+      assert.match(summary,/警告：一部の対象は未調査/);assert.match(summary,/Dependabotは未調査/);
+    }
+    assert.ok(lines.some(x=>x.startsWith('::warning::')&&x.includes('Dependabotは未調査')));
+  }finally{console.log=log;process.chdir(original);await rm(dir,{recursive:true,force:true});}
 });
