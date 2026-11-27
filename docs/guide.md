@@ -267,6 +267,10 @@ Issue #2は「コードを変更せず調査する」依頼なので、その内
 
 `/ai-fix` の結果はコマンドごとに新しいコメントで返信します。同じコマンドのActions実行を再試行した場合だけ、そのコマンドへの返信を更新します。古い結果コメントまで戻って探す必要はありません。
 
+同じIssue・PRの `/ai-fix` は1件ずつ実行し、最大100件を待機させます。`queue: max` により、後から来た依頼が古い待機依頼を置き換える動作を防ぎます。100件を超える依頼はGitHub側でキャンセルされます。待機順の詳細は[GitHubの仕様](https://docs.github.com/ja/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency)を参照してください。既に現在の版の修正PRがある場合は、そのリンクを返信して重複作成を避けます。
+
+待機中のAPIキーの期限切れ、利用上限、権限や元ブランチの変更、無効なAI回答、テスト失敗は安全な停止の対象です。「依頼を受け付けて処理すること」と「修正PRの作成成功」は別です。この待機設定は `.github/workflows/fix.yml` の更新が必要です。別の導入先ではインストーラーの `--upgrade` でワークフローも更新してください。
+
 ## 調査結果のPR作成とIssue返信を一括実行する
 
 対象Issueへ `/ai-report-pr` を単独の新規コメントとして投稿してください。調査 → Markdownの作成 → 専用ブランチとPR作成 → IssueへPRのURLを返信、まで一度の実行で行います。Actions画面からは **AI investigation** で `target: issue`、`result: report-pr` とIssue番号を指定しても実行できます。
