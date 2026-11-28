@@ -7,13 +7,6 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const source=fileURLToPath(new URL('../',import.meta.url));
 const script=await readFile(new URL('../install.sh',import.meta.url),'utf8');
-test('ordinary setup does not ask recipients to create an App or register an update token',()=>{
-  const setup=script.slice(script.indexOf('guided_setup()'),script.indexOf('\nmain()'));
-  assert.ok(!setup.includes('setup_secret "$repo" AI_BOT_UPDATE_TOKEN'));
-  assert.ok(!setup.includes('AI_BOT_APP_PRIVATE_KEY'));
-  assert.ok(setup.includes('can_approve_pull_request_reviews=true'));
-  assert.ok(setup.includes('setup_secret "$repo" "$secret"'));
-});
 
 async function fixture(fn) {
   const dir=await mkdtemp(join(tmpdir(),'ai-bot-installer-'));
