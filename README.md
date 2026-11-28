@@ -60,6 +60,8 @@ Issue本文を更新すると古いBot PRを閉じます。再実行時に旧PR�
 
 ## Botの更新
 
+**本体へのpushから全導入先へ届ける：** [GitHub Appを一度設定](docs/push-updates.md)すると、本体のmainへのpushから、Appを入れた各導入先へ更新PRを自動作成します。AI・外部サーバー不要です。Actions定義もPRに含められ、導入先ごとの更新トークンは不要です。
+
 手動で更新する場合：
 
 ```sh
@@ -70,7 +72,7 @@ curl -fsSL https://raw.githubusercontent.com/hrmcngs/github-ai-fix-bot/main/inst
 
 **更新PRを自動で受け取る：** AI API・AIキー・追加トークンは不要です。5分ごとにBot本体の更新を確認し、新版があれば自動でPRを作ります。手動で更新だけ確認する場合は **AI investigation → Run workflow → operation=update-only** を選びます。AI調査は起動しません。ActionsのPR作成許可は必要です。
 
-Actions定義は手動更新です。必要なファイルを更新PRに記載します。全体更新を手動起動する場合だけ、追加トークンと `scope=full` が必要です。[更新の詳細](docs/guide.md#bot自体の更新pr)
+定期確認方式ではActions定義は手動更新です。必要なファイルを更新PRに記載します。導入先のActionsから全体更新を手動起動する場合は、追加トークンと `scope=full` が必要です。[更新の詳細](docs/guide.md#bot自体の更新pr)
 
 **更新の配送テスト：** Bot本体のリポジトリで **Actions → Bot test update → Run workflow** を実行すると、コメント1行だけのテスト更新PRを作ります。マージ後、導入先の定期実行で更新PRが届くか確認できます。AIキー不要です。
 

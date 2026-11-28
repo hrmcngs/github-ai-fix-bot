@@ -1,0 +1,36 @@
+name: Deliver Bot updates
+on:
+  push:
+    paths:
+      - '.github/ai-bot/**'
+      - '.github/workflows/**'
+      - 'scripts/deliver-updates.mjs'
+permissions: {}
+concurrency:
+  group: deliver-bot-updates-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  deliver:
+    if: >-
+      github.repository == 'hrmcngs/github-ai-fix-bot' &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
+      vars.AI_BOT_APP_ID != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Propose updates to App installations without AI or remote code execution
+        run: node scripts/deliver-updates.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AI_BOT_APP_ID: ${{ vars.AI_BOT_APP_ID }}
+          AI_BOT_APP_PRIVATE_KEY: ${{ secrets.AI_BOT_APP_PRIVATE_KEY }}
+          AI_BOT_DELIVERY_SCOPE: ${{ vars.AI_BOT_DELIVERY_SCOPE || 'full' }}
