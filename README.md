@@ -64,6 +64,8 @@ curl -fsSL https://raw.githubusercontent.com/hrmcngs/github-ai-fix-bot/main/inst
 
 Actions定義は手動更新です。必要なファイルを更新PRに記載します。全体更新を手動起動する場合だけ、追加トークンと `scope=full` が必要です。[更新の詳細](docs/guide.md#bot自体の更新pr)
 
+**更新の配送テスト：** Bot本体のリポジトリで **Actions → Bot test update → Run workflow** を実行すると、コメント1行だけのテスト更新PRを作ります。マージ後、導入先の定期実行で更新PRが届くか確認できます。AIキー不要です。
+
 ## 削除
 
 対象リポジトリ内で実行します（Node.jsが必要）。Botの導入記録にあるファイルと設定をバックアップして削除します。
