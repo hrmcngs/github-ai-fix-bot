@@ -25,6 +25,12 @@ test('setup rejects invalid providers, modes and unsafe source paths',()=>{
   assert.throws(()=>settings(raw,{provider:'codex',mode:'all'}));
   assert.throws(()=>settings(raw,{provider:'codex',mode:'manual',sourcePaths:['../']}));
 });
+test('automatic skill reviews require an explicit setup choice and preserve that choice during ordinary reconfiguration',()=>{
+  const enabled=settings(raw,{provider:'tokyo',mode:'manual',autoReview:true});assert.equal(enabled.autoReview.enabled,true);
+  assert.equal(settings(enabled,{provider:'codex',mode:'manual'}).autoReview.enabled,true);
+  assert.equal(settings(enabled,{provider:'codex',mode:'manual',autoReview:false}).autoReview.enabled,false);
+  assert.throws(()=>settings(raw,{provider:'tokyo',mode:'manual',autoReview:'true'}));
+});
 test('configure updates config atomically, tolerates no package and refuses symlinks',async()=>{
   const root=await mkdtemp(join(tmpdir(),'ai-setup-'));
   try{

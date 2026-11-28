@@ -50,6 +50,8 @@ PRに `/ai-fix` とコメントすると、競合の統合案を作成・検証�
 
 `/ai-review --ai all` で複数AIによるレビューもできます。Actionsの **AI PR review** からPR番号を指定しても起動できます。
 
+**PRの自動レビュー：** セットアップで有効にするか、設定に `"autoReview": { "enabled": true }` を追加すると、同じリポジトリのPR作成・追加コミット時にスキルの観点で修正案をコメントします。AIキーと起動者のwrite以上の権限が必要です。同じ差分の成功済みレビューは省略し、コード変更・承認・自動マージは行いません。既存導入先はActions定義の更新も必要です。[詳細](docs/guide.md#prの自動レビュー)
+
 AIはActionsの `ai` 欄で選ぶか、`/ai-fix --ai claude` のように指定します。`--ai all` は登録済みAIの案をまとめます（最大4回のAPI利用・回答を統合担当AIへ送信）。調査・調査PR・PR競合修正でも使えます。
 
 **全件実行：** Actionsの **AI investigation** または **AI fix → Run workflow** で、番号を空欄にします。Dependabotは調査のみ対応します。 調査の `target=all` でDependabot一覧を取得できない場合は、未調査の警告を残してIssueだけを続行します。

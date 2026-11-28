@@ -1,5 +1,6 @@
 {
   "mode": "manual",
+  "autoReview": { "enabled": false },
   "referencePreviousPRs": true,
   "provider": "tokyo",
   "models": {
