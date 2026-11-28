@@ -1,5 +1,7 @@
 name: AI PR review
 on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   issue_comment:
     types: [created]
   workflow_dispatch:
@@ -17,7 +19,10 @@ permissions: {}
 jobs:
   prepare:
     if: >-
-      github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
+      (github.event_name == 'pull_request' || github.ref == format('refs/heads/{0}', github.event.repository.default_branch)) &&
+      (github.event_name != 'pull_request' ||
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+      !github.event.pull_request.draft && github.event.pull_request.base.ref == github.event.repository.default_branch)) &&
       (github.event_name != 'issue_comment' ||
       (github.event.issue.pull_request && github.event.comment.user.type == 'User' &&
       contains(github.event.comment.body, '/ai-review')))
@@ -37,7 +42,15 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
+      - id: automatic
+        if: github.event_name == 'pull_request'
+        name: Check explicit opt-in before invoking the installed controller
+        run: >-
+          node --input-type=module -e 'import fs from "node:fs";
+          const cfg=JSON.parse(fs.readFileSync(".github/ai-bot/config.json","utf8"));
+          fs.appendFileSync(process.env.GITHUB_OUTPUT,"enabled="+String(cfg.autoReview?.enabled===true)+"\n");'
       - id: prepare
+        if: github.event_name != 'pull_request' || steps.automatic.outputs.enabled == 'true'
         run: node .github/ai-bot/src/review.js prepare
         env:
           GH_TOKEN: ${{ github.token }}

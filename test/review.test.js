@@ -62,3 +62,48 @@ test('a retry reuses the successful review, while AI failures only post a safe f
   const failed=github();await assert.rejects(publishReview(env,failed));assert.equal(failed.writes.length,1);
   assert.ok(failed.writes[0].p.endsWith('/issues/7/comments'));assert.ok(!failed.writes[0].body.body.includes('sensitive-provider-error'));
 }));
+
+async function automatic(env,gh){
+  const cfg=JSON.parse(await readFile('.github/ai-bot/config.json','utf8'));cfg.autoReview={enabled:true};
+  await writeFile('.github/ai-bot/config.json',JSON.stringify(cfg));
+  gh.pr.head.repo.full_name='a/b';gh.pr.base.ref='main';gh.pr.draft=false;
+  const ev={repository:{full_name:'a/b'},action:'opened',number:7,pull_request:structuredClone(gh.pr)};
+  await writeFile(env.GITHUB_EVENT_PATH,JSON.stringify(ev));
+  return{cfg,ev,auto:{...env,GITHUB_EVENT_NAME:'pull_request',GITHUB_REF:'refs/pull/7/merge'}};
+}
+test('automatic reviews apply bundled skill guidance and post only a COMMENT without a slash command',()=>fixture(async env=>{
+  const gh=github(),{auto}=await automatic(env,gh);
+  await prepareReview(auto,gh);
+  await analyzeReview(auto,async(cfg,input)=>{
+    assert.ok(input.includes('修正案'));assert.ok(input.includes('既存の防御'));assert.ok(input.includes('確定・要検証・反証'));
+    return '## 修正案\n入力を検証する案です。未確認の懸念です。';
+  });
+  await publishReview(auto,gh);
+  assert.equal(gh.writes.length,1);assert.equal(gh.writes[0].body.event,'COMMENT');
+  assert.ok(gh.writes[0].body.body.startsWith('<!-- ai-review-auto:'));
+  assert.equal(gh.writes[0].body.commit_id,a);
+}));
+test('automatic review requires explicit opt-in and rejects forks, drafts, stale events and read-only actors',()=>fixture(async env=>{
+  const gh=github(),{cfg,ev,auto}=await automatic(env,gh);
+  assert.equal(await reviewAccess(gh,ev,auto,{...cfg,autoReview:{enabled:false}}),null);
+  for(const change of [
+    {...ev,action:'edited'},
+    {...ev,pull_request:{...ev.pull_request,draft:true}},
+    {...ev,pull_request:{...ev.pull_request,head:{...ev.pull_request.head,repo:{full_name:'fork/b'}}}},
+    {...ev,pull_request:{...ev.pull_request,head:{...ev.pull_request.head,sha:b}}},
+  ])await assert.rejects(reviewAccess(gh,change,auto,cfg));
+  const denied=github({permission:'read'});denied.pr=gh.pr;await assert.rejects(reviewAccess(denied,ev,auto,cfg));
+  const disabled={...cfg,autoReview:{enabled:false}};await writeFile('.github/ai-bot/config.json',JSON.stringify(disabled));
+  await prepareReview(auto,gh);await assert.rejects(readFile('.work/review-bundle.json'));
+}));
+test('successful automatic reviews deduplicate across runs before new AI calls and revoked opt-in blocks publication',()=>fixture(async env=>{
+  const gh=github(),{cfg,auto}=await automatic(env,gh);
+  await prepareReview(auto,gh);await analyzeReview(auto,async()=> 'Review result');await publishReview(auto,gh);
+  const prior={user:{type:'Bot',login:'github-actions[bot]'},body:gh.writes[0].body.body};
+  const list=gh.list;gh.list=async p=>p.endsWith('/reviews')?[prior]:list(p);
+  await rm('.work/review-bundle.json');
+  await prepareReview({...auto,GITHUB_RUN_ID:'101'},gh);await assert.rejects(readFile('.work/review-bundle.json'));
+  gh.list=list;await prepareReview(auto,gh);
+  await writeFile('.github/ai-bot/config.json',JSON.stringify({...cfg,autoReview:{enabled:false}}));
+  await assert.rejects(publishReview(auto,gh));assert.equal(gh.writes.length,1);
+}));
