@@ -14,7 +14,7 @@ GitHub上でIssueやDependabotアラートを調査し、日本語の修正方�
 
 ルートのpackage.jsonのスクリプト名だけを読み、checkがあれば `npm run check`、testがあれば `npm test` を検証コマンドにします。スクリプトは設定時には実行しません。testがない・既定の「no test specified」の場合はコード修正を無効にします。検証内容の十分さは人間が確認してください。代表的なソースディレクトリを追加し、Bot自身の修正許可と自動マージは無効にします。カスタム検証やmonorepoは差分を確認して手動で調整してください。
 
-本体更新にPATは不要です。任意の全体更新用PATの発行はGitHub画面で行います。表示されたリンクから導入先限定・Contents / Pull requests / Workflowsの書込み権限で発行し、非表示の入力欄に貼り付けます。空欄なら登録を省略します。Botファイルのコミット・push・マージは自動実行しません。
+本体更新にPAT・App作成・秘密鍵登録は不要で、通常セットアップでは更新用トークンの登録も求めません。質問に答えて設定したBotファイルをPRで取り込むと、導入先へのpush時と定期実行で更新確認を始めます。コミット・push・マージは自動実行しません。全体更新用PATなどの詳細設定は通常セットアップから分離しています。
 
 ## 導入
 
@@ -359,6 +359,10 @@ write以上の利用者がIssueのタイトル・本文を編集すると、`Ret
 Dependabotも調査する場合は、導入先のDependabot alertsを有効にし、Bot用ワークフローの `vulnerability-alerts: read` を確認してください（[GitHubの権限仕様](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions)）。古いActions定義が残っている導入先は、インストーラーの `--upgrade` で更新できます。
 
 ## Bot自体の更新PR
+
+導入先のデフォルトブランチへのpushでも更新確認を起動します。App・追加Secret・AIキーは不要です。featureブランチ、タグ、削除されたrefやPRイベントから更新の書込みは許可しません。pushのref・after SHAと実行環境、現在のデフォルトブランチ、起動者のwrite以上の権限を照合します。GitHubの自動トークンで作成されたコミットなど、pushイベントが発生しない場合は従来の定期確認で補います。
+
+通常セットアップからApp作成・秘密鍵・更新トークンの登録手順を外しています。GitHub標準のPR作成許可は引き続き必要で、セットアップの質問から設定します。更新するのはBot本体で、Actions定義の変更は従来どおり手動更新または本体管理者のApp配信を使います。既存導入先は今回の`bot-updates.yml`も取り込む必要があります。
 
 本体のmainへのpushから導入先へ直接PRを届ける場合は、[GitHub App配信](push-updates.md)を使います。本体側にApp IDと秘密鍵を設定し、導入先でAppをインストールします。AIや外部サーバーは不要です。以下は追加認証を使わない従来の定期確認方式です。
 

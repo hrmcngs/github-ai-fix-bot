@@ -11,7 +11,7 @@ gh auth login
 curl -fsSL https://raw.githubusercontent.com/hrmcngs/github-ai-fix-bot/main/install.sh | bash -s -- --setup
 ```
 
-AI選択・キーのSecret登録・開始方法・private送信許可・PR作成許可・更新トークンの登録を順に設定します。キーは非表示で入力し、Secretsへ直接登録します。既存設定も `--setup` では選択した内容に変更します。
+AI選択・キーのSecret登録・開始方法・private送信許可・PR作成許可を質問に答えて設定します。更新用のApp作成・秘密鍵・トークン登録は不要です。AIキーは非表示で入力し、Secretsへ直接登録します。既存設定も `--setup` では選択した内容に変更します。
 
 最後に `git diff` を確認し、BotファイルをPRでデフォルトブランチへ取り込めば完了です。設定時にプロジェクトのコードやテストは実行しません。`npm test` がない場合は調査のみ有効にします。
 
@@ -60,7 +60,7 @@ Issue本文を更新すると古いBot PRを閉じます。再実行時に旧PR�
 
 ## Botの更新
 
-**本体へのpushから全導入先へ届ける：** [GitHub Appを一度設定](docs/push-updates.md)すると、本体のmainへのpushから、Appを入れた各導入先へ更新PRを自動作成します。AI・外部サーバー不要です。Actions定義もPRに含められ、導入先ごとの更新トークンは不要です。
+**本体へのpushから全導入先へ届ける：** [本体管理者がGitHub Appを一度設定](docs/push-updates.md)すると、本体のmainへのpushから、Appを入れた各導入先へ更新PRを自動作成します。導入者はApp作成・秘密鍵の管理をせず、用意されたAppのインストールを許可するだけです。AI・外部サーバー不要で、Actions定義もPRに含められます。
 
 手動で更新する場合：
 
@@ -70,7 +70,7 @@ curl -fsSL https://raw.githubusercontent.com/hrmcngs/github-ai-fix-bot/main/inst
 
 設定を保持し、置き換えるBotファイルをバックアップします。差分を確認して取り込んでください。
 
-**更新PRを自動で受け取る：** AI API・AIキー・追加トークンは不要です。5分ごとにBot本体の更新を確認し、新版があれば自動でPRを作ります。手動で更新だけ確認する場合は **AI investigation → Run workflow → operation=update-only** を選びます。AI調査は起動しません。ActionsのPR作成許可は必要です。
+**追加設定なしの更新確認：** 導入先のデフォルトブランチへのコミット時と5分ごとにBot本体の更新を確認し、新版があればPRを作ります。更新用のApp・秘密鍵・追加Secret・AIキーは不要です。PR作成許可はセットアップで設定できます。こちらの方式は導入先へのコミットが起点で、本体へのpushを各導入先へ通知する方式とは異なります。
 
 定期確認方式ではActions定義は手動更新です。必要なファイルを更新PRに記載します。導入先のActionsから全体更新を手動起動する場合は、追加トークンと `scope=full` が必要です。[更新の詳細](docs/guide.md#bot自体の更新pr)
 
