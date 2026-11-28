@@ -301,7 +301,8 @@ export async function updates(env=process.env){
       if(error.code==='NOTIFY')throw error;
       const text=error.code==='PR'?updateError(error,env):error.code==='STALE'?'確認中にIssueまたはデフォルトブランチが更新されました。変更内容を確認して、次の定期実行、またはRun workflowで再実行してください。':error.code==='UPDATE_CONFLICT'?'Botファイルに独自の変更または保存先の競合があります。上書きせず停止しました。差分を確認して手動で更新してください。':'更新PRを作成できませんでした。トークンの権限と配布元へのアクセスを確認してください。ファイルを直接上書きしていません。';
       if(error.code!=='UPDATE_TOKEN'){
-        if(env.AI_BOT_UPDATE_AUTOMATIC==='true')await updateSummary(env,text);
+        // The CLI handler prints the actionable PR guide and Summary once.
+        if(env.AI_BOT_UPDATE_AUTOMATIC==='true'){if(error.code!=='PR')await updateSummary(env,text);}
         else await updateStatus(gh,number(event.issue?.number),updateTarget(event.issue),text);
       }
       throw error;
