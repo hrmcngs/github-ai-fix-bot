@@ -5,7 +5,7 @@ import {pathToFileURL} from 'node:url';
 import {config,providers} from './core.js';
 
 // Inspect script names only; never run project code during setup.
-export function settings(raw,{provider,mode,scripts={},sourcePaths=[]}) {
+export function settings(raw,{provider,mode,scripts={},sourcePaths=[],securityAudit}) {
   config(raw);
   if(!['all',...providers].includes(provider)||!['manual','automatic'].includes(mode))throw new Error('Invalid setup choice');
   const next=structuredClone(raw);
@@ -19,10 +19,12 @@ export function settings(raw,{provider,mode,scripts={},sourcePaths=[]}) {
   next.fix={...next.fix,enabled:Boolean(tests),commands,botFiles:[]};
   next.autoMerge={...next.autoMerge,enabled:false};
   next.include=[...new Set([...next.include,...sourcePaths])];
+  if(securityAudit!==undefined){if(typeof securityAudit!=='boolean')throw new Error('Invalid security audit choice');next.securityAudit={enabled:securityAudit};}
   config(next);
   return next;
 }
-export async function configure(root,provider,mode) {
+export async function configure(root,provider,mode,audit) {
+  if(audit!==undefined&&!['true','false'].includes(audit))throw new Error('Invalid security audit choice');
   const file=join(root,'.github/ai-bot/config.json');
   if(!(await lstat(file)).isFile())throw new Error('Configuration must be a regular file');
   let scripts={};
@@ -35,13 +37,14 @@ export async function configure(root,provider,mode) {
   for(const name of ['src','lib','app','js','frontend','backend','server','client']){
     try{if((await lstat(join(root,name))).isDirectory())sourcePaths.push(name+'/');}catch(error){if(error.code!=='ENOENT')throw error;}
   }
-  const next=settings(JSON.parse(await readFile(file,'utf8')),{provider,mode,scripts,sourcePaths});
+  const next=settings(JSON.parse(await readFile(file,'utf8')),{provider,mode,scripts,sourcePaths,securityAudit:audit===undefined?undefined:audit==='true'});
   const pending=file+'.setup-'+randomUUID();
   try{await writeFile(pending,JSON.stringify(next,null,2)+'\n',{flag:'wx',mode:0o644});await rename(pending,file);}
   finally{await unlink(pending).catch(()=>{});}
   console.log(next.fix.enabled?'修正PR：有効（npmのcheck/testを検証に使用）':'修正PR：無効（有効なnpm testがありません）。調査・調査結果PRは使えます。');
+  console.log(next.securityAudit?.enabled?'自動セキュリティ監査PR：有効（ソース更新時・毎日、AI利用枠を消費）':'自動セキュリティ監査PR：無効');
   console.log('自動マージ：無効。対象パスと検証コマンドは、取り込み前に差分を確認してください。');
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href){
-  configure(resolve(process.argv[2]||'.'),process.argv[3],process.argv[4]).catch(()=>{console.error('設定を保存できませんでした。config.jsonとpackage.jsonの形式・権限を確認してください。');process.exitCode=1;});
+  configure(resolve(process.argv[2]||'.'),process.argv[3],process.argv[4],process.argv[5]).catch(()=>{console.error('設定を保存できませんでした。config.jsonとpackage.jsonの形式・権限を確認してください。');process.exitCode=1;});
 }

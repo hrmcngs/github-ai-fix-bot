@@ -51,5 +51,8 @@
       "cli-smoke (codex)",
       "cli-smoke (broker)"
     ]
+  },
+  "securityAudit": {
+    "enabled": false
   }
 }
