@@ -244,6 +244,14 @@ test('PR failure links the destination permission setting without exposing crede
   assert.ok(!updateError({code:'PR'},{GITHUB_REPOSITORY:'../evil\nsecret'}).includes('../evil'));
   assert.ok(!updateError(new Error('secret-token'),env).includes('secret-token'));
 });
+test('standalone full updates reuse full App proposals with the legacy runtime-compatible marker',async()=>{
+  const f=fixture();
+  const pr={number:15,state:'open',body:`<!-- ai-bot-update-pr:${latest}:runtime -->\n<!-- ai-bot-app-scope:full -->\n`,head:{ref:'ai-update/bot-0123456789ab-123',repo:{full_name:'a/b'}},base:{ref:'main',repo:{full_name:'a/b'}}};
+  f.gh.list=async path=>path.includes('/pulls?')?[pr]:[];
+  await applyUpdate(f.gh,f.gh,f.event,f.env,f.state,f.source);
+  assert.ok(!f.gh.calls.some(call=>call.method==='POST'&&call.p.endsWith('/pulls')));
+  assert.ok(!f.gh.calls.some(call=>call.p.includes('/git/')));
+});
 test('full update PR failure explains the separate workflow token requirement',()=>{
   const text=updateError({code:'PR'},{GITHUB_REPOSITORY:'owner/project',AI_BOT_UPDATE_SCOPE:'full'});
   assert.ok(text.includes('AI_BOT_UPDATE_TOKEN'));assert.ok(text.includes('Contents / Pull requests / Workflows'));

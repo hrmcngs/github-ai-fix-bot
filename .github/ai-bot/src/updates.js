@@ -214,7 +214,8 @@ export async function applyUpdate(gh,writer,event,env,state,source=new Upstream(
   if(!['runtime','full'].includes(scope))throw new SafeError('CONFIG');
   if(scope==='runtime')writer=gh;
   const marker=`<!-- ai-bot-update-pr:${auth.commit}${scope==='runtime'?':runtime':''} -->`;
-  const proposals=(await gh.list(gh.path('/pulls?state=all'))).filter(pr=>pr.body?.startsWith(marker+'\n')&&pr.head?.repo?.full_name===gh.repo&&pr.base?.repo?.full_name===gh.repo&&pr.base.ref===auth.branch&&/^ai-update\/(?:bot|issue-[1-9]\d*)-[a-f0-9]{12}-[1-9]\d*$/.test(pr.head.ref||''));
+  const appFull=`<!-- ai-bot-update-pr:${auth.commit}:runtime -->\n<!-- ai-bot-app-scope:full -->\n`;
+  const proposals=(await gh.list(gh.path('/pulls?state=all'))).filter(pr=>(pr.body?.startsWith(marker+'\n')||(scope==='full'&&pr.body?.startsWith(appFull)))&&pr.head?.repo?.full_name===gh.repo&&pr.base?.repo?.full_name===gh.repo&&pr.base.ref===auth.branch&&/^ai-update\/(?:bot|issue-[1-9]\d*)-[a-f0-9]{12}-[1-9]\d*$/.test(pr.head.ref||''));
   const existing=proposals.find(pr=>pr.state==='open');
   if(existing){await notify(`更新PRは ${proposalLink(gh,existing.number)} です。レビューしてマージするとBotが更新されます。`);return;}
   if(env.AI_BOT_UPDATE_AUTOMATIC==='true'&&proposals.some(pr=>pr.state==='closed')){await notify('この版の更新PRは既に閉じられています。同じ版のPRは自動で作り直しません。');return;}

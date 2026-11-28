@@ -360,6 +360,8 @@ Dependabotも調査する場合は、導入先のDependabot alertsを有効に�
 
 ## Bot自体の更新PR
 
+本体のmainへのpushから導入先へ直接PRを届ける場合は、[GitHub App配信](push-updates.md)を使います。本体側にApp IDと秘密鍵を設定し、導入先でAppをインストールします。AIや外部サーバーは不要です。以下は追加認証を使わない従来の定期確認方式です。
+
 追加トークン不要の **runtime（本体のみ）** を既定とします。**Bot update notices** が5分ごと（毎時2・7・12…57分）に自動確認し、更新があれば専用ブランチからPRを作成します。GitHub APIと `GITHUB_TOKEN` だけを使い、AI APIの呼び出し・利用回数の消費・AIキーの登録は不要です。リポジトリのActionsによるPR作成許可が必要です。
 
 手動で更新だけ確認する場合は、**AI investigation → Run workflow → operation=update-only**、または **Bot update notices → Run workflow → scope=runtime** を選びます。`update-only` は対象取得とAI調査を起動せず、AI設定ファイルが未設定・不正でも更新処理と切り離します。選択肢が出ない導入先では、インストーラーの `--upgrade` でActions定義も更新してください。
