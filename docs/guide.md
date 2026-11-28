@@ -360,11 +360,11 @@ Dependabotも調査する場合は、導入先のDependabot alertsを有効に�
 
 ## Bot自体の更新PR
 
-追加トークン不要の **runtime（本体のみ）** を既定とします。**Bot update notices** が1時間ごと（毎時17分）に自動確認し、更新があれば専用ブランチからPRを作成します。GitHub APIと `GITHUB_TOKEN` だけを使い、AI APIの呼び出し・利用回数の消費・AIキーの登録は不要です。リポジトリのActionsによるPR作成許可が必要です。
+追加トークン不要の **runtime（本体のみ）** を既定とします。**Bot update notices** が5分ごと（毎時2・7・12…57分）に自動確認し、更新があれば専用ブランチからPRを作成します。GitHub APIと `GITHUB_TOKEN` だけを使い、AI APIの呼び出し・利用回数の消費・AIキーの登録は不要です。リポジトリのActionsによるPR作成許可が必要です。
 
 手動で更新だけ確認する場合は、**AI investigation → Run workflow → operation=update-only**、または **Bot update notices → Run workflow → scope=runtime** を選びます。`update-only` は対象取得とAI調査を起動せず、AI設定ファイルが未設定・不正でも更新処理と切り離します。選択肢が出ない導入先では、インストーラーの `--upgrade` でActions定義も更新してください。
 
-`operation=investigate` は従来どおりAI調査を実行します。この場合の「Bot本体の更新PRも確認する」（既定ON）は調査と更新の両方を起動する指定です。チェックを外しても1時間ごとの更新確認は継続します。
+`operation=investigate` は従来どおりAI調査を実行します。この場合の「Bot本体の更新PRも確認する」（既定ON）は調査と更新の両方を起動する指定です。チェックを外しても5分ごとの更新確認は継続します。
 
 runtimeでは `GITHUB_TOKEN` の contents/write・pull-requests/write をPR作成ジョブにだけ与えます。AIキーや追加PATを使用しません。`config.json`、アプリのソース、`.github/workflows/` は変更しません。既存ファイルのハッシュを照合し、独自変更や競合があれば停止します。上流コードは実行せず、人間のレビュー後にマージします。
 
@@ -372,13 +372,15 @@ Actions定義に差分がある場合は、手動更新が必要なファイル�
 
 同じ版・同じ更新範囲のPRは再利用します。見送って閉じた版は自動で作り直しません。更新がない場合はActionsのSummaryに表示します。GitHubの定期実行は遅延する場合があります。
 
+5分はGitHubが指定できる最短の定期実行間隔ですが、5分以内の起動を保証するものではありません。毎時0分を避けて配置します。確認回数は1時間間隔の12倍になるため、privateリポジトリではActions利用時間も確認してください。
+
 `GITHUB_TOKEN` で作成したPRでは通常のpush/PRワークフローが自動起動しない制約があります。マージ前に差分をレビューし、必要な手動CIを実行してください。[GitHub公式：GITHUB_TOKEN](https://docs.github.com/en/actions/concepts/security/github_token)
 
 ### 全体更新を手動で起動する場合
 
 Actions定義も含めた更新を自動でPRにする場合だけ、導入先限定のfine-grained PATに **Contents / Pull requests / Workflows: Read and write** を付け、Actions Secret `AI_BOT_UPDATE_TOKEN` に登録します。通常のActions入力欄やコメントにトークンを貼らないでください。
 
-**Bot update notices → Run workflow → scope=full** を選びます。1時間ごとの確認とAI investigationからの確認は本体のみです。全体更新でも設定・AIキーは保持し、自動マージしません。[GitHub公式：ワークフロー更新権限](https://docs.github.com/en/rest/repos/contents#create-or-update-file-contents)
+**Bot update notices → Run workflow → scope=full** を選びます。5分ごとの確認とAI investigationからの確認は本体のみです。全体更新でも設定・AIキーは保持し、自動マージしません。[GitHub公式：ワークフロー更新権限](https://docs.github.com/en/rest/repos/contents#create-or-update-file-contents)
 
 ### 処理の隔離・公開直前の再確認
 
