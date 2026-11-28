@@ -232,6 +232,25 @@ test('update entry validates repository and ref separately and reports only safe
   assert.ok(!updateError(new Error('secret-api-key')).includes('secret-api-key'));
 });
 
+test('PR failure links the destination permission setting without exposing credentials or requiring a runtime PAT',()=>{
+  const env={GITHUB_REPOSITORY:'owner/project',AI_BOT_UPDATE_SCOPE:'runtime',GH_TOKEN:'secret-token',AI_BOT_UPDATE_TOKEN:'other-secret'};
+  const text=updateError({code:'PR',message:'private API response'},env);
+  assert.ok(text.includes('https://github.com/owner/project/settings/actions#workflow-permissions'));
+  assert.ok(text.includes('Allow GitHub Actions to create and approve pull requests'));
+  assert.ok(text.includes('contents: write'));assert.ok(text.includes('pull-requests: write'));
+  assert.ok(text.includes('scope=runtimeでは追加トークン・AIキーは不要'));
+  for(const secret of ['secret-token','other-secret','private API response'])assert.ok(!text.includes(secret));
+  assert.ok(!text.includes('AI_BOT_UPDATE_TOKEN'));
+  assert.ok(!updateError({code:'PR'},{GITHUB_REPOSITORY:'../evil\nsecret'}).includes('../evil'));
+  assert.ok(!updateError(new Error('secret-token'),env).includes('secret-token'));
+});
+test('full update PR failure explains the separate workflow token requirement',()=>{
+  const text=updateError({code:'PR'},{GITHUB_REPOSITORY:'owner/project',AI_BOT_UPDATE_SCOPE:'full'});
+  assert.ok(text.includes('AI_BOT_UPDATE_TOKEN'));assert.ok(text.includes('Contents / Pull requests / Workflows'));
+  assert.ok(text.includes('https://github.com/owner/project/settings/secrets/actions'));
+  assert.ok(!text.includes('scope=runtime'));
+});
+
 test('automatic runtime detection and PR creation need no AI secrets, provider configuration or model execution',async()=>{
   const original=process.cwd(),dir=await mkdtemp(join(tmpdir(),'ai-free-update-'));
   try{
