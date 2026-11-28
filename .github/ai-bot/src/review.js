@@ -20,7 +20,7 @@ export async function reviewAccess(gh,event,env,cfg){
     if(!event.issue?.pull_request)throw new SafeError('ACCESS');
     n=await requireCommand(gh,event,env,'/ai-review',true);
   }else if(env.GITHUB_EVENT_NAME==='workflow_dispatch')n=number(event.inputs?.number);
-  else if(env.GITHUB_EVENT_NAME==='pull_request_target'){
+  else if(env.GITHUB_EVENT_NAME==='pull_request'){
     if(cfg?.autoReview?.enabled!==true)return null;
     if(!['opened','synchronize','reopened','ready_for_review'].includes(event.action)||event.pull_request?.draft||event.pull_request?.head?.repo?.full_name!==gh.repo)throw new SafeError('ACCESS');
     n=number(event.number);
@@ -28,17 +28,19 @@ export async function reviewAccess(gh,event,env,cfg){
   }
   else throw new SafeError('ACCESS');
   const repo=await gh.request(gh.path());
-  if(env.GITHUB_REF!==`refs/heads/${repo.default_branch}`)throw new SafeError('ACCESS');
+  if(env.GITHUB_EVENT_NAME==='pull_request'){
+    if(env.GITHUB_REF!==`refs/pull/${n}/merge`||event.pull_request.base?.ref!==repo.default_branch)throw new SafeError('ACCESS');
+  }else if(env.GITHUB_REF!==`refs/heads/${repo.default_branch}`)throw new SafeError('ACCESS');
   if(repo.private&&env.ALLOW_PRIVATE_REPOSITORY!=='true')throw new SafeError('PRIVATE');
   const role=await gh.request(gh.path(`/collaborators/${encodeURIComponent(env.GITHUB_ACTOR)}/permission`));
   if(!['admin','maintain','write'].includes(role.permission))throw new SafeError('ACCESS');
   const pr=await gh.request(gh.path(`/pulls/${n}`));
   if(pr.state!=='open'||pr.merged||pr.base?.repo?.full_name!==gh.repo||![pr.head?.sha,pr.base?.sha].every(x=>typeof x==='string'&&/^[a-f0-9]{40}$/.test(x)))throw new SafeError('ACCESS');
-  if(env.GITHUB_EVENT_NAME==='pull_request_target'&&(pr.draft||pr.head?.repo?.full_name!==gh.repo||pr.base?.ref!==repo.default_branch||pr.head.sha!==event.pull_request.head.sha))throw new SafeError('ACCESS');
+  if(env.GITHUB_EVENT_NAME==='pull_request'&&(pr.draft||pr.head?.repo?.full_name!==gh.repo||pr.base?.ref!==repo.default_branch||pr.head.sha!==event.pull_request.head.sha))throw new SafeError('ACCESS');
   return pr;
 }
 function reviewMarker(event,env,pr,cfg){
-  if(env.GITHUB_EVENT_NAME==='pull_request_target')return `<!-- ai-review-auto:${hash({snapshot:reviewSnapshot(pr),ai:selectionId(cfg),policy:guidance('review')})} -->`;
+  if(env.GITHUB_EVENT_NAME==='pull_request')return `<!-- ai-review-auto:${hash({snapshot:reviewSnapshot(pr),ai:selectionId(cfg),policy:guidance('review')})} -->`;
   const request=env.GITHUB_EVENT_NAME==='issue_comment'?number(event.comment.id):number(env.GITHUB_RUN_ID);
   return `<!-- ai-review:${request}:${pr.head.sha} -->`;
 }
@@ -65,10 +67,10 @@ export async function prepareReview(env=process.env,ghArg){
   const event=await json(env.GITHUB_EVENT_PATH);
   if(env.GITHUB_EVENT_NAME==='issue_comment'&&!isCommand(event,env,'/ai-review',true))return;
   const raw=config(await json('.github/ai-bot/config.json'));
-  if(env.GITHUB_EVENT_NAME==='pull_request_target'&&raw.autoReview?.enabled!==true)return;
+  if(env.GITHUB_EVENT_NAME==='pull_request'&&raw.autoReview?.enabled!==true)return;
   const gh=ghArg||new GitHub(env.GITHUB_REPOSITORY,env.GH_TOKEN),pr=await reviewAccess(gh,event,env,raw);
   const cfg=chooseAI(raw,event,env);
-  if(env.GITHUB_EVENT_NAME==='pull_request_target'){
+  if(env.GITHUB_EVENT_NAME==='pull_request'){
     const marker=reviewMarker(event,env,pr,cfg);
     if((await gh.list(gh.path(`/pulls/${pr.number}/reviews`))).some(r=>botOwned(r)&&r.body?.startsWith(marker)))return;
   }

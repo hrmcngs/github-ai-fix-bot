@@ -69,7 +69,7 @@ async function automatic(env,gh){
   gh.pr.head.repo.full_name='a/b';gh.pr.base.ref='main';gh.pr.draft=false;
   const ev={repository:{full_name:'a/b'},action:'opened',number:7,pull_request:structuredClone(gh.pr)};
   await writeFile(env.GITHUB_EVENT_PATH,JSON.stringify(ev));
-  return{cfg,ev,auto:{...env,GITHUB_EVENT_NAME:'pull_request_target'}};
+  return{cfg,ev,auto:{...env,GITHUB_EVENT_NAME:'pull_request',GITHUB_REF:'refs/pull/7/merge'}};
 }
 test('automatic reviews apply bundled skill guidance and post only a COMMENT without a slash command',()=>fixture(async env=>{
   const gh=github(),{auto}=await automatic(env,gh);
