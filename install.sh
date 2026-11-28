@@ -145,7 +145,7 @@ setup_secret() {
   fi
 }
 guided_setup() {
-  local root=$1 repo='' provider='' mode='' secret='' visibility='' defaults='' secret_names='' full_updates=false auto_review=false audit=false
+  local root=$1 repo='' provider='' mode='' secret='' visibility='' defaults='' secret_names='' auto_review=false audit=false
   repo=$(cd "$root" && gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null) || fail 'gh auth login を実行してから --setup を再実行してください。'
   [[ "$repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || fail '導入先を確認できませんでした。'
   printf '\nかんたん設定：%s\n' "$repo"
@@ -188,21 +188,11 @@ guided_setup() {
       printf 'PR作成許可を取得できませんでした。設定画面で確認してください。\n'
     fi
   fi
-  printf '\nBot本体の更新PRは追加トークンなしで受け取れます。Actions定義は手動更新です。\n'
-  setup_prompt 'Actions定義も自動更新するためのトークンを登録しますか？ [y/N]: ' || return 1
-  if [[ "$REPLY" == y || "$REPLY" == Y ]]; then
-    full_updates=true
-    printf '導入先限定のfine-grained PATに Contents / Pull requests / Workflows の Read and write が必要です。\n'
-    printf '発行画面：https://github.com/settings/personal-access-tokens/new\n'
-    setup_secret "$repo" AI_BOT_UPDATE_TOKEN || true
-    printf '全体更新は Bot update notices の scope=full から実行します。5分ごとの自動更新は本体のみです。\n'
-  fi
+  printf '\n更新用のApp作成・秘密鍵・トークン登録は不要です。導入先へのpush時と5分ごとにBot本体の更新を確認します。\n'
+  printf 'Actions定義の更新方法は詳細ガイドを参照してください。\n'
   secret_names=$(gh secret list --repo "$repo" --json name --jq '.[].name' 2>/dev/null) || secret_names=''
   if ! printf '%s\n' "$secret_names" | grep -Fxq "$secret"; then
     printf '未完了：%s の登録を確認できません。試運転前にSecrets画面で登録してください。\n' "$secret"
-  fi
-  if [[ "$full_updates" == true ]] && ! printf '%s\n' "$secret_names" | grep -Fxq AI_BOT_UPDATE_TOKEN; then
-    printf 'Bot更新PR：トークンを確認できません。必要な場合は後から登録できます。\n'
   fi
   printf '\n設定ファイル：%s/.github/ai-bot/config.json\n' "$root"
   printf '残り：git diffを確認し、BotファイルをPRでデフォルトブランチへ取り込んでください。\n'
@@ -388,10 +378,9 @@ Next steps:
   3. Register TOKYO_AI_API_KEY, ANTHROPIC_API_KEY or OPENAI_API_KEY in Actions Secrets.
      Never paste API keys into Issues, comments or workflow inputs.
   4. Actions > AI investigation or AI fix > Run workflow (blank number processes all).
-  5. Bot update notices checks for updates every five minutes and opens an update PR automatically.
+  5. Bot update notices checks on default-branch pushes and every five minutes, opening an update PR automatically.
      Runtime update PRs use GITHUB_TOKEN; workflow definitions must be updated manually.
      AI investigation also checks runtime updates by default when run manually.
-     Optional full updates require AI_BOT_UPDATE_TOKEN and scope=full.
 
 Docs: https://github.com/hrmcngs/github-ai-fix-bot#readme
 NEXT

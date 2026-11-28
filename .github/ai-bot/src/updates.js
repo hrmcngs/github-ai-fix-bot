@@ -158,12 +158,14 @@ export async function authorizeUpdate(gh,event,env){
   if(approved!==current)throw new SafeError('STALE');
   return{number:n,commit:current,branch:repo.default_branch};
 }
-// Automatic proposals are authorized by the trusted scheduled/check job, not Issue text.
+const automaticEvent=(event,env)=>['schedule','workflow_dispatch'].includes(env.GITHUB_EVENT_NAME)
+  ||(env.GITHUB_EVENT_NAME==='push'&&!event.deleted&&event.ref===env.GITHUB_REF&&sha(env.GITHUB_SHA)&&event.after===env.GITHUB_SHA);
+// Automatic proposals are authorized by the trusted push/scheduled/check job, not Issue text.
 export async function authorizeAutomaticUpdate(gh,event,env){
-  if(env.AI_BOT_UPDATE_AUTOMATIC!=='true'||!['schedule','workflow_dispatch'].includes(env.GITHUB_EVENT_NAME))throw new SafeError('ACCESS');
+  if(env.AI_BOT_UPDATE_AUTOMATIC!=='true'||!automaticEvent(event,env))throw new SafeError('ACCESS');
   const repo=await gh.request(gh.path());
   if(event.repository?.full_name!==gh.repo||env.GITHUB_REF!==`refs/heads/${repo.default_branch}`)throw new SafeError('ACCESS');
-  if(env.GITHUB_EVENT_NAME==='workflow_dispatch'){
+  if(env.GITHUB_EVENT_NAME!=='schedule'){
     const role=await gh.request(gh.path(`/collaborators/${encodeURIComponent(env.GITHUB_ACTOR)}/permission`));
     if(!['admin','maintain','write'].includes(role.permission))throw new SafeError('ACCESS');
   }
@@ -292,7 +294,7 @@ export async function updates(env=process.env){
   }
   const state=await loadInstallation(gh,event,env,action);if(!state)return;
   if(action==='check'){
-    if(!['schedule','workflow_dispatch'].includes(env.GITHUB_EVENT_NAME))throw new SafeError('UPDATE_EVENT');
+    if(!automaticEvent(event,env))throw new SafeError('UPDATE_EVENT');
     const update=await checkUpdate(gh,state,undefined,scope);
     if(!update)await updateSummary(env,scope==='runtime'?'Bot本体の更新はありません。Actions定義の更新は手動で確認してください。':'Botは最新版です。');
     if(update&&env.GITHUB_OUTPUT)await appendFile(env.GITHUB_OUTPUT,`ready=true\ncommit=${update.commit}\n`);

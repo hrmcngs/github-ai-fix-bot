@@ -1,5 +1,6 @@
 name: Bot update notices
 on:
+  push:
   schedule:
     - cron: '2-59/5 * * * *'
   workflow_dispatch:
@@ -27,7 +28,9 @@ jobs:
     concurrency:
       group: bot-update-notices-${{ github.repository }}
       cancel-in-progress: false
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: >-
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'push') &&
+      (github.event_name != 'push' || github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:

@@ -168,6 +168,23 @@ test('a scheduled update creates a direct PR without any Issue or comment',async
   assert.ok(!f.gh.calls.some(c=>c.p.endsWith('/issues/comments/123')));
   assert.ok(!f.gh.calls.some(c=>c.p.endsWith('/merge')));
 });
+test('recipient default-branch pushes create runtime update PRs using only the automatic GitHub token',async()=>{
+  const f=fixture(),env={...automatic(f,'push'),GITHUB_SHA:base,AI_BOT_UPDATE_SCOPE:'runtime'};
+  const event={repository:{full_name:'a/b'},ref:'refs/heads/main',after:base};
+  assert.equal((await authorizeAutomaticUpdate(f.gh,event,env)).commit,latest);
+  await applyUpdate(f.gh,null,event,env,f.state,f.source);
+  assert.ok(f.gh.calls.some(call=>call.method==='POST'&&call.p.endsWith('/pulls')));
+  assert.ok(!f.gh.calls.some(call=>call.p.includes('/issues')));
+  for(const key of ['AI_BOT_UPDATE_TOKEN','AI_BOT_APP_ID','AI_BOT_APP_PRIVATE_KEY','AI_API_KEY'])assert.equal(env[key],undefined);
+});
+test('recipient push authorization rejects forged events, tags, deleted refs and insufficient roles',async()=>{
+  const f=fixture(),env={...automatic(f,'push'),GITHUB_SHA:base},event={repository:{full_name:'a/b'},ref:'refs/heads/main',after:base};
+  for(const bad of [{...event,deleted:true},{...event,after:old},{...event,ref:'refs/tags/v1'},{...event,repository:{full_name:'fork/repo'}}])await assert.rejects(authorizeAutomaticUpdate(f.gh,bad,env));
+  const readOnly=fixture({role:'read'});await assert.rejects(authorizeAutomaticUpdate(readOnly.gh,event,env));
+  await assert.rejects(authorizeAutomaticUpdate(f.gh,event,{...env,GITHUB_REF:'refs/heads/feature'}));
+  await assert.rejects(authorizeAutomaticUpdate(f.gh,event,{...env,GITHUB_EVENT_NAME:'pull_request'}));
+  assert.ok(!f.gh.calls.some(call=>call.method!=='GET'));
+});
 test('automatic retries reuse open PRs and respect closed PRs without needing writer credentials',async()=>{
   for(const state of ['open','closed']){
     const f=fixture(),list=f.gh.list;
