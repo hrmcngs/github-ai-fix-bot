@@ -1,0 +1,162 @@
+name: AI security audit
+on:
+  push:
+    paths-ignore:
+      - 'reports/ai/security-audit.md'
+  schedule:
+    - cron: '41 3 * * *'
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: security-audit-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  prepare:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      ready: ${{ steps.prepare.outputs.ready }}
+      provider: ${{ steps.prepare.outputs.provider }}
+      sha: ${{ steps.prepare.outputs.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - id: prepare
+        run: node .github/ai-bot/src/security.js prepare
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ALLOW_PRIVATE_REPOSITORY: ${{ vars.AI_BOT_ALLOW_PRIVATE }}
+          AI_BOT_HAS_TOKYO: ${{ secrets.TOKYO_AI_API_KEY != '' }}
+          AI_BOT_HAS_CLAUDE: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+          AI_BOT_HAS_CODEX: ${{ secrets.OPENAI_API_KEY != '' }}
+      - if: steps.prepare.outputs.ready == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: security-bundle
+          path: .work/fix-bundle.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+  generate:
+    needs: prepare
+    if: needs.prepare.outputs.ready == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    outputs:
+      has-changes: ${{ steps.generate.outputs.has-changes }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: security-bundle
+          path: .work
+      - name: Build Claude runner without credentials
+        if: (needs.prepare.outputs.provider == 'claude' || needs.prepare.outputs.provider == 'all')
+        run: docker build --build-arg PROVIDER=claude -f .github/ai-bot/Dockerfile -t ai-bot-claude:local .github/ai-bot
+      - name: Build Codex runner without credentials
+        if: (needs.prepare.outputs.provider == 'codex' || needs.prepare.outputs.provider == 'all')
+        run: docker build --build-arg PROVIDER=codex -f .github/ai-bot/Dockerfile -t ai-bot-codex:local .github/ai-bot
+      - name: Build credential broker without credentials
+        if: needs.prepare.outputs.provider != 'tokyo'
+        run: docker build --build-arg PROVIDER=broker -f .github/ai-bot/Dockerfile -t ai-bot-broker:local .github/ai-bot
+      - id: generate
+        name: Generate a bounded security audit and optional fix
+        run: node .github/ai-bot/src/security.js generate
+        env:
+          AI_API_KEY: ${{ (needs.prepare.outputs.provider == 'tokyo' && secrets.TOKYO_AI_API_KEY || needs.prepare.outputs.provider == 'claude' && secrets.ANTHROPIC_API_KEY || needs.prepare.outputs.provider == 'codex' && secrets.OPENAI_API_KEY) || '' }}
+          TOKYO_AI_API_KEY: ${{ needs.prepare.outputs.provider == 'all' && secrets.TOKYO_AI_API_KEY || '' }}
+          ANTHROPIC_API_KEY: ${{ needs.prepare.outputs.provider == 'all' && secrets.ANTHROPIC_API_KEY || '' }}
+          OPENAI_API_KEY: ${{ needs.prepare.outputs.provider == 'all' && secrets.OPENAI_API_KEY || '' }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: security-plan
+          path: .work/fix-plan.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+  validate:
+    needs: [prepare, generate]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: security-bundle
+          path: .work
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: security-plan
+          path: .work
+      - name: Build offline validator without credentials
+        if: needs.generate.outputs.has-changes == 'true'
+        run: docker build -f .github/ai-bot/Dockerfile.verify -t ai-bot-verify:local .github/ai-bot
+      - name: Validate inside a secretless offline container
+        run: node .github/ai-bot/src/security.js validate
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: security-verdict
+          path: .work/fix-verdict.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: [prepare, generate, validate]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: security-bundle
+          path: .work
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: security-plan
+          path: .work
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: security-verdict
+          path: .work
+      - name: Publish a validated security fix or an audit report PR
+        run: node .github/ai-bot/src/security.js publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ALLOW_PRIVATE_REPOSITORY: ${{ vars.AI_BOT_ALLOW_PRIVATE }}

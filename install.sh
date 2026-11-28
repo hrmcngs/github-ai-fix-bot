@@ -145,7 +145,7 @@ setup_secret() {
   fi
 }
 guided_setup() {
-  local root=$1 repo='' provider='' mode='' secret='' visibility='' defaults='' secret_names='' full_updates=false auto_review=false
+  local root=$1 repo='' provider='' mode='' secret='' visibility='' defaults='' secret_names='' full_updates=false auto_review=false audit=false
   repo=$(cd "$root" && gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null) || fail 'gh auth login を実行してから --setup を再実行してください。'
   [[ "$repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || fail '導入先を確認できませんでした。'
   printf '\nかんたん設定：%s\n' "$repo"
@@ -161,7 +161,9 @@ guided_setup() {
   done
   setup_prompt 'PR作成・更新時にスキルの観点で自動レビューしますか？（AI利用枠を消費・提案コメントのみ）[y/N]: ' || return 1
   if [[ "$REPLY" == y || "$REPLY" == Y ]]; then auto_review=true; fi
-  node "$root/.github/ai-bot/src/configure.js" "$root" "$provider" "$mode" "$auto_review" || return 1
+  setup_prompt 'ソース更新時と毎日の自動セキュリティ監査PRを有効にしますか？（AI利用枠を消費・要レビュー）[y/N]: ' || return 1
+  if [[ "$REPLY" == y || "$REPLY" == Y ]]; then audit=true; fi
+  node "$root/.github/ai-bot/src/configure.js" "$root" "$provider" "$mode" "$auto_review" "$audit" || return 1
   setup_secret "$repo" "$secret" || true
   if [[ "$provider" == all ]]; then
     setup_secret "$repo" ANTHROPIC_API_KEY || true
@@ -225,6 +227,7 @@ main() {
     .github/ai-bot/src/bulk.js
     .github/ai-bot/src/updates.js
     .github/ai-bot/src/guidance.js
+    .github/ai-bot/src/security.js
     .github/ai-bot/src/core.js
     .github/ai-bot/src/commands.js
     .github/ai-bot/src/auto-merge.js
@@ -248,6 +251,7 @@ main() {
     .github/workflows/bot-updates.yml
     .github/workflows/proposal-updates.yml
     .github/workflows/auto-merge.yml
+    .github/workflows/security-audit.yml
   )
   while (($#)); do
     case "$1" in
